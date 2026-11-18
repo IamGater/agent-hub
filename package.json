@@ -1,0 +1,46 @@
+{
+  "name": "agent-hub",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server/index.js",
+    "build": "vite build web",
+    "build:watch": "vite build web --watch",
+    "reset-auth": "node --env-file-if-exists=.env server/cli/reset-auth.js",
+    "killswitch": "node --env-file-if-exists=.env server/cli/killswitch.js",
+    "remote": "node --env-file-if-exists=.env server/cli/remote.js",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "dependencies": {
+    "@fastify/static": "10.1.11",
+    "@simplewebauthn/server": "14.1.0",
+    "@xterm/headless": "6.0.0",
+    "better-sqlite3": "13.2.0",
+    "fastify": "5.12.8",
+    "node-pty": "1.1.0",
+    "ws": "8.23.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@simplewebauthn/browser": "14.0.0",
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/addon-web-links": "0.12.0",
+    "@xterm/xterm": "6.0.0",
+    "eslint": "10.15.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.14.0",
+    "prettier": "3.10.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "vite": "8.3.8",
+    "vitest": "5.1.1"
+  }
+}
