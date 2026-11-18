@@ -1,0 +1,23 @@
+[
+  {
+    "id": "claude",
+    "name": "Claude Code",
+    "type": "claude",
+    "command": "C:\\Users\\you\\.local\\bin\\claude.exe",
+    "cwd": "C:\\Users\\you\\Documents\\GitHub"
+  },
+  {
+    "id": "codex",
+    "name": "Codex",
+    "type": "codex",
+    "command": "C:\\Users\\you\\AppData\\Roaming\\npm\\codex.cmd",
+    "cwd": "C:\\Users\\you\\Documents\\GitHub"
+  },
+  {
+    "id": "antigravity",
+    "name": "Antigravity",
+    "type": "antigravity",
+    "command": "C:\\Users\\you\\AppData\\Local\\agy\\bin\\agy.exe",
+    "cwd": "C:\\Users\\you\\Documents\\GitHub"
+  }
+]

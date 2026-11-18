@@ -1,0 +1,28 @@
+{
+  "origin": "https://my-pc.tail1234.ts.net",
+  "port": 8780,
+  "remotePort": 8781,
+  "rpName": "Agent Hub",
+  "dataDir": "./data",
+  "agentsFile": "./agents.json",
+  "allowedRoots": ["C:\\Users\\you\\Documents\\GitHub"],
+  "stepupMinutes": 5,
+  "sessionHours": 12,
+  "idleMinutes": 30,
+  "bufferBytes": 2097152,
+  "prompt": {
+    "idleMs": 1500,
+    "patterns": [
+      "\\(y/n\\)",
+      "\\[y/N\\]",
+      "\\[Y/n\\]",
+      "Do you want to",
+      "Allow (this|command|execution)",
+      "Approve",
+      "Proceed\\?",
+      "Press Enter to",
+      "Yes, and"
+    ]
+  },
+  "logInputText": false
+}
