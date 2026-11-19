@@ -15,8 +15,12 @@ import { killTree } from '../../agents/kill.js';
  * }} Hooks
  *
  * What the agent reports about itself while it runs: the model in use, how full the context is
- * (tokens), and the plan of the account it is signed in with.
- * @typedef {{ model?: string, context?: { used: number, size: number }, plan?: string }} Meta
+ * (tokens), the plan of the account it is signed in with, and the tokens this session has spent so
+ * far (`cached`: input read from the prompt cache, counted apart since it costs far less).
+ * @typedef {{ input: number, output: number, cached: number }} Tokens
+ * @typedef {{
+ *   model?: string, context?: { used: number, size: number }, plan?: string, tokens?: Tokens,
+ * }} Meta
  *
  * Account limits: `percent` used of a window of `windowMins`, resetting at `resetsAt` (ms).
  * @typedef {{ kind: string, windowMins: number | null, percent: number, resetsAt: number | null }} Limit
@@ -41,7 +45,7 @@ import { killTree } from '../../agents/kill.js';
  * @typedef {{
  *   command: string, args: string[], cwd: string, env: Record<string, string>,
  *   hooks: Hooks, model?: string, spawn?: typeof nodeSpawn, now: () => number,
- *   resume?: string, history?: any[],
+ *   resume?: string, history?: any[], mcp?: boolean,
  * }} DriverOpts
  * `resume` is the id of a past session to continue; `history` its messages to show (Claude only,
  * the other agents send their history themselves).

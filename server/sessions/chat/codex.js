@@ -236,6 +236,13 @@ export function startCodex(opts) {
         const u = p.tokenUsage;
         if (typeof u?.last?.totalTokens === 'number' && typeof u.modelContextWindow === 'number')
           hooks.meta({ context: { used: u.last.totalTokens, size: u.modelContextWindow } });
+        const t = u?.total;
+        if (typeof t?.inputTokens === 'number' && typeof t.outputTokens === 'number') {
+          const cached = typeof t.cachedInputTokens === 'number' ? t.cachedInputTokens : 0;
+          hooks.meta({
+            tokens: { input: Math.max(0, t.inputTokens - cached), cached, output: t.outputTokens },
+          });
+        }
         return;
       }
       case 'turn/started':

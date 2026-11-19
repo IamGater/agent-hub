@@ -123,6 +123,9 @@ export function startClaude(opts) {
     return first ? first.prompt : null;
   }
 
+  /** Tokens spent in this run, summed over the answers. */
+  const tokens = { input: 0, output: 0, cached: 0 };
+
   /** @param {any} msg */
   function onMessage(msg) {
     switch (msg.type) {
@@ -162,6 +165,14 @@ export function startClaude(opts) {
         return;
       }
       case 'result':
+        if (msg.usage && typeof msg.usage === 'object') {
+          const u = msg.usage;
+          const n = (/** @type {unknown} */ v) => (typeof v === 'number' && v > 0 ? v : 0);
+          tokens.input += n(u.input_tokens) + n(u.cache_creation_input_tokens);
+          tokens.cached += n(u.cache_read_input_tokens);
+          tokens.output += n(u.output_tokens);
+          hooks.meta({ tokens: { ...tokens } });
+        }
         hooks.busy(false);
         proc.write({
           type: 'control_request',
@@ -287,6 +298,8 @@ export function startClaude(opts) {
         'stdio',
         ...(opts.model ? ['--model', opts.model] : []),
         ...(opts.resume ? ['--resume', opts.resume] : []),
+        // Without the owner's MCP servers (each session would start its own copy of every one).
+        ...(opts.mcp === false ? ['--strict-mcp-config'] : []),
       ],
     },
     onMessage,
