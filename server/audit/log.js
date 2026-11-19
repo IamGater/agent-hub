@@ -7,7 +7,7 @@ import { redact, redactDeep } from './redact.js';
  *   | 'passkey_added' | 'passkey_removed' | 'agent_start' | 'agent_stop' | 'agent_restart' | 'agent_exit'
  *   | 'input' | 'killswitch' | 'lockout' | 'ws_rejected' | 'action_failed' | 'reset_auth'
  *   | 'enroll_code' | 'enroll_failed' | 'remote_on' | 'remote_off' | 'approval' | 'interrupt'
- *   | 'link' | 'unlink' | 'permissions' | 'auto_approved' | 'shutdown' | 'shutdown_cancel' | 'settings_on_close'} AuditEvent
+ *   | 'link' | 'unlink' | 'permissions' | 'auto_approved' | 'shutdown' | 'shutdown_cancel' | 'settings_on_close' | 'server_restart'} AuditEvent
  */
 
 /**

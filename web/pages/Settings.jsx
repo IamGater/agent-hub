@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, dangerous, messageOf } from '../api.js';
 import { LANGUAGES, setLang, t, useLang } from '../i18n.js';
 import ConfirmButton from '../components/ConfirmButton.jsx';
-import { Phone, Power } from '../components/Icons.jsx';
+import { Phone, Power, Restart } from '../components/Icons.jsx';
 import { useControl } from '../hooks/useCountdown.js';
 
 function date(ms) {
@@ -343,6 +343,98 @@ function OnClose({ state }) {
   );
 }
 
+/** Waits for the restarted server to answer, then loads the page again (it may be a new build). */
+async function waitForServer() {
+  await new Promise((r) => setTimeout(r, 1500));
+  for (let i = 0; i < 60; i++) {
+    try {
+      const res = await fetch('/api/state', { cache: 'no-store', credentials: 'same-origin' });
+      if (res.ok) return window.location.reload();
+    } catch {
+      // Still starting.
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  const err = new Error('The server did not come back');
+  err.name = 'restart_timeout';
+  throw err;
+}
+
+/** Restarts the server: picks up new code and agents.json. Running agents are stopped. */
+function RestartServer({ agents }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const working = agents.filter((a) => a.busy).length;
+  const running = agents.filter((a) => a.pid !== null).length;
+
+  async function run() {
+    setBusy(true);
+    setError(null);
+    try {
+      await dangerous({ type: 'server-restart' });
+      await waitForServer();
+    } catch (err) {
+      setError(err);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="card stack-sm">
+      <h3>{t('restart.title')}</h3>
+      <p className="muted small">{t('restart.hint')}</p>
+      {running > 0 && (
+        <p className={working ? 'warn-text small' : 'muted small'}>
+          {working
+            ? t('restart.working', { n: String(working) })
+            : t('restart.running', { n: String(running) })}
+        </p>
+      )}
+      {busy ? (
+        <p className="muted">{t('restart.progress')}</p>
+      ) : (
+        <ConfirmButton className="btn" armedLabel={t('restart.armed')} onConfirm={run}>
+          <Restart size={15} /> {t('restart.button')}
+        </ConfirmButton>
+      )}
+      {error && <p className="error small">{messageOf(error)}</p>}
+    </section>
+  );
+}
+
+/** The emergency stop: every agent, every phone session and remote access, at once. */
+function KillAll({ onChange }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [done, setDone] = useState(false);
+
+  async function run() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api('/api/killall', {});
+      setDone(true);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+      onChange();
+    }
+  }
+
+  return (
+    <section className="card stack-sm">
+      <h3>{t('killAll')}</h3>
+      <p className="muted small">{t('killAllHint')}</p>
+      <ConfirmButton className="btn danger" disabled={busy} armedLabel={t('killAllArmed')} onConfirm={run}>
+        <Power size={15} /> {t('killAll')}
+      </ConfirmButton>
+      {done && <p className="muted small">{t('killAllDone')}</p>}
+      {error && <p className="error small">{messageOf(error)}</p>}
+    </section>
+  );
+}
+
 /** Turns the computer off after Windows' one-minute notice, which can be cancelled from here. */
 function PowerOff() {
   const [busy, setBusy] = useState(false);
@@ -407,6 +499,8 @@ export default function Settings({ state, onChange, agents, conn }) {
       <Permissions agents={agents} control={control} />
       <OnClose state={state} />
       <PhoneSettings state={state} onChange={onChange} />
+      <RestartServer agents={agents} />
+      <KillAll onChange={onChange} />
       <PowerOff />
     </main>
   );

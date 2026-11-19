@@ -39,6 +39,7 @@ import { attachWs } from './ws/server.js';
  *   killAll: (actor: import('./audit/log.js').Actor | null, source: string) => Promise<void>,
  *   remoteOff: (actor: import('./audit/log.js').Actor | null, source: string) => void,
  *   power: import('./agents/power.js').Power,
+ *   restartServer?: () => void,
  *   scope: (req: import('fastify').FastifyRequest) => Scope,
  *   log: import('fastify').FastifyBaseLogger,
  *   ws: {

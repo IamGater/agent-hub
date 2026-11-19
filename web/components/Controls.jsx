@@ -4,7 +4,7 @@ import { t } from '../i18n.js';
 import { formatMs, useControl } from '../hooks/useCountdown.js';
 import { navigate } from '../hooks/useRoute.js';
 import ConfirmButton from './ConfirmButton.jsx';
-import { Gauge, Gear, Lock, Logout, Play, Power } from './Icons.jsx';
+import { Gauge, Gear, Lock, Logout, Play } from './Icons.jsx';
 
 function useAction(onChange) {
   const [busy, setBusy] = useState(false);
@@ -155,17 +155,6 @@ export function NavLinks({ state, onChange, route }) {
           <Logout size={16} /> <span className="nav-label">{t('logout')}</span>
         </button>
       )}
-      <ConfirmButton
-        className="nav-item danger"
-        onConfirm={() => run(() => api('/api/killall', {}))}
-        armedLabel={
-          <>
-            <Power size={16} /> <span className="nav-label">{t('killAllArmed')}</span>
-          </>
-        }
-      >
-        <Power size={16} /> <span className="nav-label">{t('killAll')}</span>
-      </ConfirmButton>
       {error && <p className="error small">{error}</p>}
     </nav>
   );

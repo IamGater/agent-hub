@@ -38,6 +38,7 @@ const action = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('remote-on') }),
   z.strictObject({ type: z.literal('auto-approve'), agentId }),
   z.strictObject({ type: z.literal('shutdown') }),
+  z.strictObject({ type: z.literal('server-restart') }),
   z.strictObject({ type: z.literal('remote-enroll') }),
 ]);
 
@@ -142,6 +143,12 @@ export function apiRoutes(app, ctx, requireAccess) {
         ctx.audit('shutdown', actor, { delaySeconds: SHUTDOWN_DELAY_S });
         void ctx.notify('Shutdown', `The computer turns off in ${SHUTDOWN_DELAY_S} seconds.`);
         return { ok: true, delaySeconds: SHUTDOWN_DELAY_S };
+      case 'server-restart':
+        // Stops the agents like closing does, then starts a fresh copy (new code, agents.json).
+        if (!ctx.restartServer) return reply.code(501).send({ error: 'not_supported' });
+        ctx.audit('server_restart', actor);
+        ctx.restartServer();
+        return { ok: true };
       case 'remote-on':
         setRemoteEnabled(db, true);
         ctx.audit('remote_on', actor, { source: 'web' });
@@ -173,10 +180,16 @@ export function apiRoutes(app, ctx, requireAccess) {
   app.get('/api/agents/:id/usage', { preHandler: requireAccess }, async (req, reply) => {
     const id = agentId.safeParse(/** @type {{ id?: string }} */ (req.params).id);
     if (!id.success || !manager.has(id.data)) return reply.code(400).send({ error: 'bad_request' });
+    const query = /** @type {{ fresh?: string, cached?: string }} */ (req.query);
+    // The last known limits start nothing, so any access may read them.
+    if (query.cached === '1') {
+      const hit = manager.cachedUsage(id.data);
+      return { account: hit?.account ?? null, at: hit?.at ?? null };
+    }
     if (!inControl(req)) return reply.code(403).send({ error: 'view_mode' });
     try {
-      const fresh = /** @type {{ fresh?: string }} */ (req.query).fresh === '1';
-      return { account: await manager.usage(id.data, fresh) };
+      const account = await manager.usage(id.data, query.fresh === '1');
+      return { account, at: manager.cachedUsage(id.data)?.at ?? null };
     } catch (err) {
       req.log.warn({ err: /** @type {Error} */ (err).message }, 'usage failed');
       return reply.code(502).send({ error: 'usage_failed' });
