@@ -128,6 +128,8 @@ export const agentSchema = z
       }),
     cwd: z.string().min(1).max(1024),
     env: z.record(z.string().regex(envName), z.string().max(4096)).default({}),
+    // false: a Claude agent starts without the MCP servers from the owner's Claude settings.
+    mcp: z.boolean().default(true),
   })
   .refine((a) => a.type === 'terminal' || a.args.length === 0, {
     message: 'chat agents take no args: the server sets the flags (use "model" to pick a model)',

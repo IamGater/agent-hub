@@ -74,5 +74,6 @@ Step by step: [docs/SETUP_WINDOWS.md](docs/SETUP_WINDOWS.md). In short:
 
   The `.bat` files themselves cannot be used as `command`: they are run by `cmd.exe`, which parses arguments its own way.
 
+- `mcp: false` starts a Claude agent without the MCP servers from your Claude settings. Otherwise each agent starts its own copy of every server (for `npx` servers that is two node processes each).
 - `command` is an absolute path only, without the characters `" % & | < > ^ !`. `cwd` (the default folder) is inside `allowedRoots`; `env` adds variables.
 - Arguments that turn on auto-approval or bypass the sandbox are refused at load time.
