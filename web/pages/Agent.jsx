@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { useFitInView } from '../hooks/useFitInView.js';
 import { api, dangerous, messageOf } from '../api.js';
 import { t } from '../i18n.js';
@@ -13,7 +13,9 @@ import { ArrowUp, Folder, History, LinkIcon, Play, Restart, Stop } from '../comp
 import KeyBar from '../components/KeyBar.jsx';
 import PromptCard from '../components/PromptCard.jsx';
 import StatusDot, { statusText } from '../components/StatusDot.jsx';
-import Terminal from '../components/Terminal.jsx';
+
+// xterm.js is only needed by terminal agents; chat-only setups never load it.
+const Terminal = lazy(() => import('../components/Terminal.jsx'));
 
 function ProjectPicker({ value, onChange, disabled }) {
   const [projects, setProjects] = useState([]);
@@ -349,13 +351,15 @@ export default function Agent({ agent, agents, conn, wide }) {
           )}
 
           <div className="term-card">
-            <Terminal
-              agentId={agent.id}
-              listen={conn.listen}
-              send={conn.send}
-              control={control}
-              focus={wide && running}
-            />
+            <Suspense fallback={null}>
+              <Terminal
+                agentId={agent.id}
+                listen={conn.listen}
+                send={conn.send}
+                control={control}
+                focus={wide && running}
+              />
+            </Suspense>
           </div>
 
           {!wide &&

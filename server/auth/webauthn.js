@@ -1,15 +1,14 @@
 // @ts-check
 import crypto from 'node:crypto';
-import {
-  generateAuthenticationOptions,
-  generateRegistrationOptions,
-  verifyAuthenticationResponse,
-  verifyRegistrationResponse,
-} from '@simplewebauthn/server';
-import { decodeClientDataJSON } from '@simplewebauthn/server/helpers';
 import { z } from 'zod';
 import { getSetting, setSetting } from '../db.js';
 import { getPasskey, listPasskeys, usePasskey } from './store.js';
+
+// Passkeys are used only by the phone, so the library (and its crypto dependencies, ~15 MB of
+// memory) loads on first use instead of at startup.
+/** @type {Promise<typeof import('@simplewebauthn/server')> | null} */
+let libPromise = null;
+const lib = () => (libPromise ??= import('@simplewebauthn/server'));
 
 const b64url = z
   .string()
@@ -54,7 +53,7 @@ export const authenticationResponse = z.object({
  */
 export function challengeOf(res) {
   try {
-    const c = decodeClientDataJSON(res.response.clientDataJSON).challenge;
+    const c = JSON.parse(Buffer.from(res.response.clientDataJSON, 'base64url').toString('utf8')).challenge;
     return typeof c === 'string' && c.length > 0 && c.length <= 128 ? c : null;
   } catch {
     return null;
@@ -76,7 +75,8 @@ function userId(db) {
  * @param {import('../config/load.js').Scope} scope
  * @param {import('better-sqlite3').Database} db
  */
-export function registrationOptions(rpName, scope, db) {
+export async function registrationOptions(rpName, scope, db) {
+  const { generateRegistrationOptions } = await lib();
   return generateRegistrationOptions({
     rpName,
     rpID: scope.rpID,
@@ -104,6 +104,7 @@ export function registrationOptions(rpName, scope, db) {
  * @param {string} challenge already taken from the challenge store
  */
 export async function verifyRegistration(scope, response, challenge) {
+  const { verifyRegistrationResponse } = await lib();
   const result = await verifyRegistrationResponse({
     // @ts-expect-error transports are validated as strings; the library narrows them further
     response,
@@ -121,7 +122,8 @@ export async function verifyRegistration(scope, response, challenge) {
  * @param {import('better-sqlite3').Database} db
  * @param {boolean} discoverable login uses discoverable credentials; step-up lists ours explicitly
  */
-export function authenticationOptions(scope, db, discoverable) {
+export async function authenticationOptions(scope, db, discoverable) {
+  const { generateAuthenticationOptions } = await lib();
   return generateAuthenticationOptions({
     rpID: scope.rpID,
     userVerification: 'required',
@@ -144,6 +146,7 @@ export function authenticationOptions(scope, db, discoverable) {
 export async function verifyAssertion(scope, db, response, challenge, now) {
   const pk = getPasskey(db, response.id, scope.rpID);
   if (!pk) return null;
+  const { verifyAuthenticationResponse } = await lib();
   const result = await verifyAuthenticationResponse({
     response,
     expectedChallenge: challenge,
