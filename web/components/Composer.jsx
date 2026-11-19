@@ -1,0 +1,208 @@
+import { useEffect, useRef, useState } from 'react';
+import { messageOf } from '../api.js';
+import { has, t } from '../i18n.js';
+import { useAutosize } from '../hooks/useAutosize.js';
+import { useSessions, when } from '../hooks/useSessions.js';
+import { ArrowUp, Stop } from './Icons.jsx';
+
+/** "<low|medium|high>" or "[on|off]" lists the values the argument can take. */
+function hintChoices(hint) {
+  const m = /^[<[]([\w.-]+(?:\|[\w.-]+)+)[>\]]$/.exec(hint ?? '');
+  return m ? m[1].split('|').map((v) => ({ value: v, label: v })) : null;
+}
+
+/** Where the owner is in typing a command: its name, or its argument. */
+function stageOf(text) {
+  const name = /^\/([\w:.-]*)$/.exec(text);
+  if (name) return { kind: 'name', q: name[1].toLowerCase() };
+  const arg = /^\/([\w:.-]+)[ \t]+([^\n]*)$/.exec(text);
+  if (arg) return { kind: 'arg', name: arg[1], q: arg[2].trim().toLowerCase() };
+  return null;
+}
+
+function describe(agent, c) {
+  return agent.type === 'codex' && has(`codexcmd.${c.name}`) ? t(`codexcmd.${c.name}`) : c.description;
+}
+
+export default function Composer({ agent, control, wide, commands, onSend, onStop, blocked }) {
+  const [text, setText] = useState('');
+  const [active, setActive] = useState(0);
+  const [closed, setClosed] = useState(false);
+  const input = useRef(null);
+  const list = useRef(null);
+  useAutosize(input, text);
+  const running = agent.pid !== null;
+  const enabled = control && running && !agent.busy;
+
+  const stage = enabled && !closed ? stageOf(text) : null;
+  const command = stage?.kind === 'arg' ? commands.find((c) => c.name === stage.name) : null;
+  const sessions = useSessions(agent.id, agent.cwd, command?.dynamic === 'sessions');
+
+  // Rows: commands while the name is typed; values (models, levels, sessions) for the argument.
+  let rows = null;
+  let note = null;
+  if (stage?.kind === 'name') {
+    rows = commands
+      .filter((c) => c.name.toLowerCase().startsWith(stage.q))
+      .slice(0, 60)
+      .map((c) => ({
+        key: c.name,
+        main: `/${c.name}`,
+        hint: c.hint,
+        sub: describe(agent, c),
+        pick: () => `/${c.name} `,
+      }));
+  } else if (command) {
+    let choices = command.options ?? hintChoices(command.hint);
+    if (command.dynamic === 'sessions') {
+      choices = sessions.list?.map((s) => ({ value: s.id, label: s.title, sub: when(s.updatedAt) })) ?? null;
+      if (sessions.loading) note = t('chat.sessionsLoading');
+      else if (sessions.error) note = messageOf(sessions.error);
+      else if (!choices?.length) note = t('chat.noSessions');
+    }
+    if (choices) {
+      rows = choices
+        .filter(
+          (o) =>
+            !stage.q || o.value.toLowerCase().startsWith(stage.q) || o.label.toLowerCase().includes(stage.q),
+        )
+        .slice(0, 60)
+        .map((o) => ({
+          key: o.value,
+          main: o.label,
+          hint: o.label === o.value ? '' : o.value,
+          sub: o.sub,
+          final: true,
+          pick: () => `/${command.name} ${o.value}`,
+        }));
+    } else if (!note && command.hint) {
+      note = `/${command.name} ${command.hint}`;
+    }
+  }
+  const shown = rows?.length ? rows : null;
+  const current = shown ? Math.min(active, shown.length - 1) : 0;
+
+  useEffect(() => {
+    list.current?.querySelector('.active')?.scrollIntoView({ block: 'nearest' });
+  }, [current]);
+
+  function submit(e) {
+    e?.preventDefault();
+    const value = text.trim();
+    if (!value || !enabled) return;
+    onSend(value);
+    setText('');
+    setClosed(false);
+  }
+
+  function choose(row) {
+    setText(row.pick());
+    setActive(0);
+    // After a value the command is complete; after a name, its arguments are offered next.
+    setClosed(Boolean(row.final));
+    input.current?.focus();
+  }
+
+  function onKeyDown(e) {
+    if (shown) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        return setActive((current + 1) % shown.length);
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        return setActive((current - 1 + shown.length) % shown.length);
+      }
+      if (e.key === 'Tab' || (wide && e.key === 'Enter' && !e.shiftKey)) {
+        e.preventDefault();
+        return choose(shown[current]);
+      }
+    }
+    if (e.key === 'Escape') return setClosed(true);
+    // At the computer Enter sends, like in a chat; on the phone Enter is a new line.
+    if (wide && e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) submit(e);
+  }
+
+  if (!control || !running) return <div className="composer-wrap">{blocked}</div>;
+
+  // The agent reports model ids; the /model list knows their display names.
+  const modelName = agent.model
+    ? (commands.find((c) => c.name === 'model')?.options?.find((o) => o.value === agent.model)?.label ??
+      agent.model)
+    : null;
+  const fill = agent.context?.size ? Math.round((agent.context.used / agent.context.size) * 100) : null;
+
+  let placeholder = t('chat.placeholder');
+  if (!running) placeholder = t('agentNotRunning');
+  else if (!control) placeholder = t('viewModeHint');
+  else if (agent.busy) placeholder = t('chat.answering');
+
+  return (
+    <div className="composer-wrap">
+      {(shown || note) && (
+        <div className="commands">
+          {note && <p className="cmd-note">{note}</p>}
+          {shown && (
+            <ul role="listbox" aria-label={t('chat.commands')} ref={list}>
+              {shown.map((row, i) => (
+                <li
+                  key={row.key}
+                  role="option"
+                  aria-selected={i === current}
+                  className={i === current ? 'active' : ''}
+                  // A tap picks, a swipe scrolls: click fires only for a tap. Keeping focus in
+                  // the text box (mousedown) leaves the phone keyboard open.
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => choose(row)}
+                >
+                  <span className="cmd-name">
+                    {row.main}
+                    {row.hint && <span className="cmd-hint"> {row.hint}</span>}
+                  </span>
+                  {row.sub && <span className="cmd-desc">{row.sub}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+      <form className="composer chat-composer" onSubmit={submit}>
+        <textarea
+          ref={input}
+          value={text}
+          onChange={(e) => {
+            setText(e.target.value);
+            setClosed(false);
+            setActive(0);
+          }}
+          onKeyDown={onKeyDown}
+          placeholder={placeholder}
+          disabled={!control || !running}
+          maxLength={6000}
+          rows={1}
+          aria-autocomplete="list"
+          aria-expanded={Boolean(shown)}
+        />
+        {agent.busy && control ? (
+          <button type="button" className="send stop" aria-label={t('chat.stop')} onClick={onStop}>
+            <Stop size={16} />
+          </button>
+        ) : (
+          <button className="send" aria-label={t('send')} disabled={!enabled || !text.trim()}>
+            <ArrowUp />
+          </button>
+        )}
+      </form>
+      {(modelName || fill !== null) && (
+        <div className="composer-meta muted small">
+          {modelName && <span title={t('usage.model')}>{modelName}</span>}
+          {fill !== null && (
+            <span title={t('usage.contextHint', { used: agent.context.used, size: agent.context.size })}>
+              {t('usage.context', { percent: fill })}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
