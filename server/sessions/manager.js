@@ -65,9 +65,12 @@ const ROWS = 30;
  *   spawn?: typeof pty.spawn, spawnChild?: typeof nodeSpawn, now?: () => number, autoApprove?: string[],
  *   stillAutoApproved?: (id: string) => boolean,
  *   lastFolders?: Record<string, string>, onFolder?: (id: string, cwd: string) => void,
+ *   savedModels?: Record<string, string>, onModel?: (id: string, model: string | null) => void,
  * }} opts
  * `lastFolders` are the folders agents were last started in (offered again if still allowed);
  * `onFolder` is told about each start so they can be stored.
+ * `savedModels` are the models the owner picked with /model, used for every later start until
+ * changed (`/model default` goes back to the agent's configured one); `onModel` stores a choice.
  * `stillAutoApproved` is asked again before each automatic answer: the kill switch run from the
  * command line clears the setting in the database while this process keeps its own copy.
  */
@@ -81,7 +84,12 @@ export function createManager({
   stillAutoApproved = () => true,
   lastFolders = {},
   onFolder = () => {},
+  savedModels = {},
+  onModel = () => {},
 }) {
+  const models = { ...savedModels };
+  /** Messages typed while the agent answers wait here; more than this is refused. */
+  const QUEUE_MAX = 20;
   const events = new EventEmitter();
   const patterns = config.prompt.patterns.map((p) => new RegExp(p, 'i'));
 
@@ -94,6 +102,7 @@ export function createManager({
    *   transcript: ReturnType<typeof createTranscript>,
    *   commands: import('./chat/process.js').Command[],
    *   images: Map<string, string>, link: Link | null,
+   *   queue: { itemId: string, text: string, from?: string }[], modelAsk: string | null,
    * }} Session
    */
   /** @type {Map<string, Session>} */
@@ -124,6 +133,8 @@ export function createManager({
       commands: [],
       images: new Map(),
       link: null,
+      queue: [],
+      modelAsk: null,
       info: {
         id: agent.id,
         name: agent.name,
@@ -267,6 +278,14 @@ export function createManager({
     if (images.length) rest.images = images.map((p) => imageRef(s, p));
     const stored = s.transcript.upsert(rest);
     events.emit('chat', { id: s.agent.id, item: stored });
+    // The owner's /model choice is kept for later starts once the agent has taken it.
+    if (item.kind === 'notice' && item.code === 'model_set' && s.modelAsk !== null) {
+      const choice = s.modelAsk === 'default' ? null : s.modelAsk;
+      s.modelAsk = null;
+      if (choice === null) delete models[s.agent.id];
+      else models[s.agent.id] = choice;
+      onModel(s.agent.id, choice);
+    }
     if (item.kind === 'approval' && item.status === 'pending' && s.info.autoApprove) {
       if (!stillAutoApproved(s.agent.id)) {
         update(s, { autoApprove: false });
@@ -342,23 +361,63 @@ export function createManager({
   function say(id, text, from) {
     const s = get(id);
     if (!s.chat) return 'not_running';
-    if (s.info.busy) return 'agent_busy';
+    const itemId = `user:${now()}:${Math.random().toString(36).slice(2, 8)}`;
+    // While the agent answers, the message waits and goes in as soon as the answer is done.
+    if (s.info.busy || s.queue.length) {
+      if (s.queue.length >= QUEUE_MAX) return 'queue_full';
+      s.queue.push({ itemId, text, ...(from ? { from } : {}) });
+      chatItem(s, {
+        id: itemId,
+        kind: 'user',
+        ts: now(),
+        text,
+        status: 'pending',
+        ...(from ? { from } : {}),
+      });
+      return null;
+    }
+    return deliver(s, itemId, text, from);
+  }
+
+  /**
+   * Hands a message to the agent and records it in the chat under `itemId`.
+   * @param {Session} s @param {string} itemId @param {string} text @param {string} [from]
+   * @returns {string | null} an error code, or null when the agent took it
+   */
+  function deliver(s, itemId, text, from) {
+    if (!s.chat) return 'not_running';
     const resume = from ? null : /^\/resume(?:\s+(\S*))?\s*$/.exec(text.trim());
     if (resume) {
       if (!resume[1] || !SESSION_ID.test(resume[1])) return 'bad_command';
       void restartOn(s, resume[1]);
       return null;
     }
+    const model = from ? null : /^\/model\s+(\S+)\s*$/.exec(text.trim());
     const refused = s.chat.send(text);
     if (refused) return refused;
-    chatItem(s, {
-      id: `user:${now()}:${Math.random().toString(36).slice(2, 8)}`,
-      kind: 'user',
-      ts: now(),
-      text,
-      ...(from ? { from } : {}),
-    });
+    if (model) s.modelAsk = model[1];
+    chatItem(s, { id: itemId, kind: 'user', ts: now(), text, status: undefined, ...(from ? { from } : {}) });
     return null;
+  }
+
+  /** Sends the next waiting message once the agent is free. @param {Session} s */
+  function flush(s) {
+    while (s.queue.length && s.chat && !s.info.busy) {
+      const next = /** @type {{ itemId: string, text: string, from?: string }} */ (s.queue.shift());
+      const refused = deliver(s, next.itemId, next.text, next.from);
+      if (refused) {
+        chatItem(s, { id: next.itemId, kind: 'user', ts: now(), status: 'cancelled' });
+        chatItem(s, noticeItem('not_done', { message: refused }, 'error', now()));
+      }
+    }
+  }
+
+  /** Drops waiting messages, all of them or one. @param {Session} s @param {string} [itemId] */
+  function dropQueued(s, itemId) {
+    const dropped = itemId ? s.queue.filter((q) => q.itemId === itemId) : s.queue;
+    s.queue = itemId ? s.queue.filter((q) => q.itemId !== itemId) : [];
+    for (const q of dropped) chatItem(s, { id: q.itemId, kind: 'user', ts: now(), status: 'cancelled' });
+    return dropped.length > 0;
   }
 
   /** @param {Session} s @param {string} session */
@@ -388,6 +447,8 @@ export function createManager({
         if (s.info.busy === busy) return;
         update(s, { busy });
         if (!busy && s.link) relay(s);
+        // After the driver has finished handling the end of the answer.
+        if (!busy && s.queue.length) queueMicrotask(() => flush(s));
       },
       waiting(prompt) {
         const was = s.info.status;
@@ -415,7 +476,7 @@ export function createManager({
       cwd,
       env,
       hooks,
-      model: s.agent.model,
+      model: models[id] ?? s.agent.model,
       spawn: spawnChild,
       now,
       resume,
@@ -426,7 +487,7 @@ export function createManager({
     s.chat = chat;
     update(s, {
       status: 'running',
-      model: s.agent.model ?? null,
+      model: models[id] ?? s.agent.model ?? null,
       context: null,
       cwd,
       pid: chat.pid,
@@ -437,7 +498,9 @@ export function createManager({
     });
     s.exited = chat.exited.then((exitCode) => {
       s.chat = null;
+      s.modelAsk = null;
       unlink(s);
+      dropQueued(s);
       chatItem(
         s,
         exitCode === null
@@ -625,6 +688,8 @@ export function createManager({
       const s = get(id);
       return s.chat ? s.chat.answer(requestId, allow) : false;
     },
+    /** Removes one waiting message. @param {string} id @param {string} itemId */
+    unqueue: (id, itemId) => dropQueued(get(id), itemId),
     /** @param {string} id */
     interrupt(id) {
       const s = get(id);

@@ -23,6 +23,7 @@ export const clientMessage = z.discriminatedUnion('type', [
     allow: z.boolean(),
   }),
   z.strictObject({ type: z.literal('chat-interrupt'), agentId }),
+  z.strictObject({ type: z.literal('chat-unqueue'), agentId, itemId: z.string().min(1).max(64) }),
   z.strictObject({ type: z.literal('chat-link'), agentId, peer: agentId, hops: z.int().min(1).max(20) }),
   z.strictObject({ type: z.literal('chat-unlink'), agentId }),
 ]);

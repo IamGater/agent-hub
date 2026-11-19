@@ -1,10 +1,30 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ApiError, messageOf } from '../api.js';
 import { has, t } from '../i18n.js';
 import Composer from './Composer.jsx';
 import Dropdown from './Dropdown.jsx';
 import { Close, Copy, Forward } from './Icons.jsx';
 import Markdown from './Markdown.jsx';
+
+// The server keeps a bounded transcript; without the same bound here a long session would grow
+// the window's memory forever. Oldest items go first, like on the server.
+const MAX_ITEMS = 400;
+const MAX_CHARS = 1_000_000;
+
+function sizeOf(item) {
+  return (item.text?.length ?? 0) + (item.detail?.length ?? 0) + (item.output?.length ?? 0) + 200;
+}
+
+function bounded(list) {
+  let total = 0;
+  let start = list.length;
+  while (start > 0 && list.length - start < MAX_ITEMS) {
+    total += sizeOf(list[start - 1]);
+    if (total > MAX_CHARS && start < list.length) break;
+    start -= 1;
+  }
+  return start === 0 ? list : list.slice(start);
+}
 
 /** Keeps the conversation and the command list of one chat agent in sync with the server. */
 function useChat(agentId, listen) {
@@ -13,21 +33,25 @@ function useChat(agentId, listen) {
   useEffect(() => {
     return listen(agentId, (msg) => {
       if (msg.type === 'chat-snapshot') {
-        setItems(msg.items);
+        setItems(bounded(msg.items));
       } else if (msg.type === 'chat-commands') {
         setCommands(msg.commands);
       } else if (msg.type === 'chat-item') {
         setItems((list) => {
           const i = list.findIndex((x) => x.id === msg.item.id);
-          if (i < 0) return [...list, msg.item];
+          if (i < 0) return bounded([...list, msg.item]);
           const next = list.slice();
           next[i] = msg.item;
           return next;
         });
       } else if (msg.type === 'chat-delta') {
-        setItems((list) =>
-          list.map((x) => (x.id === msg.itemId ? { ...x, text: (x.text ?? '') + msg.text } : x)),
-        );
+        setItems((list) => {
+          const i = list.findLastIndex((x) => x.id === msg.itemId);
+          if (i < 0) return list;
+          const next = list.slice();
+          next[i] = { ...list[i], text: (list[i].text ?? '') + msg.text };
+          return i === list.length - 1 ? bounded(next) : next;
+        });
       }
     });
   }, [agentId, listen]);
@@ -86,16 +110,18 @@ function Images({ agentId, item, onOpen }) {
 }
 
 function Tool({ agentId, item, onOpen }) {
+  // Outputs run to 20k characters each; keep them out of the page until the owner opens one.
+  const [open, setOpen] = useState(false);
   return (
     <div className="tool-wrap">
-      <details className={`tool ${item.status ?? ''}`}>
+      <details className={`tool ${item.status ?? ''}`} onToggle={(e) => setOpen(e.currentTarget.open)}>
         <summary>
           <span className={`tool-dot ${item.status ?? ''}`} />
           <span className="tool-title">{item.title}</span>
           <span className="tool-status">{item.status ? t(`tool.${item.status}`) : ''}</span>
         </summary>
-        {item.detail && <pre className="tool-pre">{item.detail}</pre>}
-        {item.output && <pre className="tool-pre out">{item.output}</pre>}
+        {open && item.detail && <pre className="tool-pre">{item.detail}</pre>}
+        {open && item.output && <pre className="tool-pre out">{item.output}</pre>}
       </details>
       <Images agentId={agentId} item={item} onOpen={onOpen} />
     </div>
@@ -152,13 +178,28 @@ function MessageActions({ text, agent, agents, control, conn }) {
   );
 }
 
-function Item({ item, agent, agents, control, conn, onAnswer, onOpen }) {
+// Streaming changes one item many times a second; the others keep their identity and skip
+// re-rendering (and re-parsing their Markdown).
+const Item = memo(function Item({ item, agent, agents, control, conn, onAnswer, onOpen, onUnqueue }) {
   switch (item.kind) {
     case 'user':
       return (
-        <div className={`msg user ${item.from ? 'relayed' : ''}`}>
+        <div
+          className={`msg user ${item.from ? 'relayed' : ''} ${item.status === 'pending' ? 'queued' : ''} ${item.status === 'cancelled' ? 'dropped' : ''}`}
+        >
           {item.from && <span className="msg-from">{t('chat.from', { agent: item.from })}</span>}
           {item.text}
+          {item.status === 'pending' && (
+            <span className="msg-queue">
+              {t('chat.queued')}
+              {control && (
+                <button className="msg-unqueue" onClick={() => onUnqueue(item.id)}>
+                  {t('chat.unqueue')}
+                </button>
+              )}
+            </span>
+          )}
+          {item.status === 'cancelled' && <span className="msg-queue">{t('chat.notSent')}</span>}
         </div>
       );
     case 'assistant':
@@ -175,7 +216,7 @@ function Item({ item, agent, agents, control, conn, onAnswer, onOpen }) {
     default:
       return <div className={`notice ${item.level ?? ''}`}>{noticeText(item)}</div>;
   }
-}
+});
 
 function Lightbox({ image, onClose }) {
   useEffect(() => {
@@ -227,6 +268,28 @@ export default function Chat({ agent, agents, conn, control, wide, blocked }) {
   }, [problem]);
 
   const send = (msg) => conn.send({ ...msg, agentId: agent.id });
+  const connSend = conn.send;
+  const agentId = agent.id;
+  const onAnswer = useCallback(
+    (requestId, allow) => connSend({ type: 'chat-answer', requestId, allow, agentId }),
+    [connSend, agentId],
+  );
+  const onUnqueue = useCallback(
+    (itemId) => connSend({ type: 'chat-unqueue', itemId, agentId }),
+    [connSend, agentId],
+  );
+
+  // Esc stops the answer, like in Claude Code. Not while a picture is open or a menu took the key.
+  const canStop = control && agent.busy;
+  useEffect(() => {
+    if (!canStop || image) return undefined;
+    const onKey = (e) => {
+      if (e.key !== 'Escape' || e.defaultPrevented || e.repeat) return;
+      connSend({ type: 'chat-interrupt', agentId });
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [canStop, image, connSend, agentId]);
 
   return (
     <div className="chat">
@@ -254,7 +317,8 @@ export default function Chat({ agent, agents, conn, control, wide, blocked }) {
               control={control}
               conn={conn}
               onOpen={setImage}
-              onAnswer={(requestId, allow) => send({ type: 'chat-answer', requestId, allow })}
+              onAnswer={onAnswer}
+              onUnqueue={onUnqueue}
             />
           ))}
           {agent.busy && agent.status !== 'waiting' && (

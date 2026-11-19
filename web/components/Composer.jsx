@@ -32,7 +32,8 @@ export default function Composer({ agent, control, wide, commands, onSend, onSto
   const list = useRef(null);
   useAutosize(input, text);
   const running = agent.pid !== null;
-  const enabled = control && running && !agent.busy;
+  // While the agent answers a message still goes: it waits in a queue for the answer to end.
+  const enabled = control && running;
 
   const stage = enabled && !closed ? stageOf(text) : null;
   const command = stage?.kind === 'arg' ? commands.find((c) => c.name === stage.name) : null;
@@ -118,7 +119,14 @@ export default function Composer({ agent, control, wide, commands, onSend, onSto
         return choose(shown[current]);
       }
     }
-    if (e.key === 'Escape') return setClosed(true);
+    if (e.key === 'Escape') {
+      // The first Esc closes the command list; with nothing open it stops the answer (see Chat).
+      if (shown || note) {
+        e.preventDefault();
+        return setClosed(true);
+      }
+      return undefined;
+    }
     // At the computer Enter sends, like in a chat; on the phone Enter is a new line.
     if (wide && e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) submit(e);
   }
@@ -135,7 +143,7 @@ export default function Composer({ agent, control, wide, commands, onSend, onSto
   let placeholder = t('chat.placeholder');
   if (!running) placeholder = t('agentNotRunning');
   else if (!control) placeholder = t('viewModeHint');
-  else if (agent.busy) placeholder = t('chat.answering');
+  else if (agent.busy) placeholder = t('chat.answeringQueue');
 
   return (
     <div className="composer-wrap">
@@ -183,7 +191,7 @@ export default function Composer({ agent, control, wide, commands, onSend, onSto
           aria-autocomplete="list"
           aria-expanded={Boolean(shown)}
         />
-        {agent.busy && control ? (
+        {agent.busy && control && !text.trim() ? (
           <button type="button" className="send stop" aria-label={t('chat.stop')} onClick={onStop}>
             <Stop size={16} />
           </button>
