@@ -25,6 +25,8 @@ import { resolveWorkdir } from '../agents/workdir.js';
  *   startedAt: number | null, prompt: string | null, busy: boolean,
  *   link: { peer: string, left: number } | null, autoApprove: boolean,
  *   model: string | null, context: { used: number, size: number } | null, plan: string | null,
+ *   tokens: import('./chat/process.js').Tokens | null, busySince: number | null,
+ *   lastTurnMs: number | null,
  * }} AgentInfo
  *
  * `autoApprove`: the owner chose to let this agent act without asking. The agent itself still runs
@@ -66,7 +68,9 @@ const ROWS = 30;
  *   stillAutoApproved?: (id: string) => boolean,
  *   lastFolders?: Record<string, string>, onFolder?: (id: string, cwd: string) => void,
  *   savedModels?: Record<string, string>, onModel?: (id: string, model: string | null) => void,
+ *   savedUsage?: Record<string, CachedUsage>, onUsage?: (id: string, usage: CachedUsage) => void,
  * }} opts
+ * @typedef {{ at: number, account: import('./chat/process.js').AccountUsage }} CachedUsage
  * `lastFolders` are the folders agents were last started in (offered again if still allowed);
  * `onFolder` is told about each start so they can be stored.
  * `savedModels` are the models the owner picked with /model, used for every later start until
@@ -86,7 +90,11 @@ export function createManager({
   onFolder = () => {},
   savedModels = {},
   onModel = () => {},
+  savedUsage = {},
+  onUsage = () => {},
 }) {
+  /** The last plan limits each agent reported, shown while a fresh look is on its way. */
+  const lastUsage = { ...savedUsage };
   const models = { ...savedModels };
   /** Messages typed while the agent answers wait here; more than this is refused. */
   const QUEUE_MAX = 20;
@@ -153,6 +161,9 @@ export function createManager({
         model: null,
         context: null,
         plan: null,
+        tokens: null,
+        busySince: null,
+        lastTurnMs: null,
       },
     });
   }
@@ -445,7 +456,13 @@ export function createManager({
       },
       busy(busy) {
         if (s.info.busy === busy) return;
-        update(s, { busy });
+        // How long the answer takes: a running clock while busy, the last duration after.
+        const since = s.info.busySince;
+        update(s, {
+          busy,
+          busySince: busy ? now() : null,
+          ...(!busy && since ? { lastTurnMs: now() - since } : {}),
+        });
         if (!busy && s.link) relay(s);
         // After the driver has finished handling the end of the answer.
         if (!busy && s.queue.length) queueMicrotask(() => flush(s));
@@ -477,6 +494,7 @@ export function createManager({
       env,
       hooks,
       model: models[id] ?? s.agent.model,
+      mcp: s.agent.mcp,
       spawn: spawnChild,
       now,
       resume,
@@ -489,6 +507,9 @@ export function createManager({
       status: 'running',
       model: models[id] ?? s.agent.model ?? null,
       context: null,
+      tokens: null,
+      busySince: null,
+      lastTurnMs: null,
       cwd,
       pid: chat.pid,
       exitCode: null,
@@ -507,7 +528,7 @@ export function createManager({
           ? noticeItem('not_started', {}, 'error', now())
           : noticeItem('exited', { code: String(exitCode) }, exitCode === 0 ? 'info' : 'error', now()),
       );
-      update(s, { status: 'exited', pid: null, exitCode, prompt: null, busy: false });
+      update(s, { status: 'exited', pid: null, exitCode, prompt: null, busy: false, busySince: null });
       events.emit('exit', { id, exitCode });
     });
     events.emit('spawn', { id, pid: chat.pid, startedAt: s.info.startedAt });
@@ -550,7 +571,14 @@ export function createManager({
     if (s.agent.type === 'claude') value = claudeUsage(opts);
     else if (s.agent.type === 'codex') value = codexUsage(opts);
     // A failure is not cached, so the next look tries again.
-    value.catch(() => usageCache.delete(id));
+    value.then(
+      (account) => {
+        if (!account) return;
+        lastUsage[id] = { at: now(), account };
+        onUsage(id, lastUsage[id]);
+      },
+      () => usageCache.delete(id),
+    );
     usageCache.set(id, { at: now(), value });
     return value;
   }
@@ -663,6 +691,8 @@ export function createManager({
     unlink: (id) => unlink(get(id)),
     sessions: sessionsOf,
     usage: usageOf,
+    /** The last limits seen, without starting anything. @param {string} id @returns {CachedUsage | null} */
+    cachedUsage: (id) => (get(id), lastUsage[id] ?? null),
     /** @param {string} id @param {boolean} on */
     setAutoApprove(id, on) {
       const s = get(id);

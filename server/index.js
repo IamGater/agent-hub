@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApp } from './app.js';
@@ -8,10 +9,12 @@ import {
   getLastFolders,
   getModels,
   getOnClose,
+  getUsageCache,
   isRemoteEnabled,
   openDb,
   setLastFolder,
   setModel,
+  setUsageCache,
 } from './db.js';
 import { createManager } from './sessions/manager.js';
 import { createNotifier } from './audit/notify.js';
@@ -38,6 +41,8 @@ const manager = createManager({
   onFolder: (id, cwd) => setLastFolder(db, id, cwd),
   savedModels: getModels(db),
   onModel: (id, model) => setModel(db, id, model),
+  savedUsage: getUsageCache(db),
+  onUsage: (id, usage) => setUsageCache(db, id, usage),
 });
 const webRoot = path.join(root, 'web', 'dist');
 const hasWeb = fs.existsSync(path.join(webRoot, 'index.html'));
@@ -80,23 +85,38 @@ if (config.scopes.remote) {
 }
 
 let closing = false;
-async function shutdown() {
+/** @param {boolean} [again] start a fresh copy of the server once this one has let go of its ports */
+async function shutdown(again = false) {
   if (closing) return;
   closing = true;
   await manager.stopAll();
   await app.close();
   db.close();
+  if (again) {
+    // Same node flags and arguments; output goes to server.log, as with the launcher.
+    const log = fs.openSync(path.join(root, 'server.log'), 'a');
+    const child = spawn(process.execPath, [...process.execArgv, ...process.argv.slice(1)], {
+      cwd: process.cwd(),
+      env: process.env,
+      detached: true,
+      stdio: ['ignore', log, log],
+      windowsHide: true,
+    });
+    child.unref();
+  }
   process.exit(0);
 }
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
+// After the reply has gone out.
+ctx.restartServer = () => void setTimeout(() => void shutdown(true), 300);
+process.on('SIGINT', () => void shutdown());
+process.on('SIGTERM', () => void shutdown());
 
 // What closing the app window does is the owner's choice (Settings), see agents/autoclose.js.
 const autoClose = createAutoClose({
   manager,
   settings: () => getOnClose(db),
   remoteOn: () => isRemoteEnabled(db),
-  onExit: shutdown,
+  onExit: () => shutdown(),
   log: { info: (msg) => app.log.info(msg) },
 });
 ctx.onLocalWindows = (n) => autoClose.windows(n);

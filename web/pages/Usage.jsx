@@ -36,7 +36,7 @@ function resets(ms, now) {
 }
 
 /** The current time, moving every 30 seconds, for the countdowns. */
-function useNow() {
+export function useNow() {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30_000);
@@ -45,9 +45,64 @@ function useNow() {
   return now;
 }
 
+/** Blue while there is room, yellow from 75%, red from 90%. */
+export function levelOf(percent) {
+  return percent >= 90 ? 'high' : percent >= 75 ? 'mid' : 'low';
+}
+
+/** "just now", "5 min ago", "2 h ago": how old the shown limits are. */
+function ago(at, now) {
+  const min = Math.floor(Math.max(0, now - at) / 60_000);
+  if (min < 1) return t('usage.justNow');
+  if (min < 60) return t('usage.minAgo', { m: min });
+  return t('usage.hoursAgo', { h: Math.floor(min / 60) });
+}
+
+/**
+ * Plan limits of one agent. The last known ones (kept by the server) show at once; asking the
+ * account takes a few seconds, and its answer replaces them when it comes.
+ */
+export function useAgentUsage(agent, control, tick) {
+  const limited = agent.type === 'claude' || agent.type === 'codex';
+  const [state, setState] = useState({ key: '', account: null, at: null, error: null, fresh: false });
+  const key = `${agent.id}:${tick}:${control}`;
+
+  useEffect(() => {
+    if (!limited) return undefined;
+    let alive = true;
+    const base = `/api/agents/${encodeURIComponent(agent.id)}/usage`;
+    api(`${base}?cached=1`).then(
+      (r) =>
+        alive &&
+        r.account &&
+        setState((s) => (s.key === key && s.fresh ? s : { ...s, account: r.account, at: r.at })),
+      () => {},
+    );
+    if (control) {
+      api(`${base}${tick ? '?fresh=1' : ''}`).then(
+        (r) =>
+          alive && setState({ key, account: r.account, at: r.at ?? Date.now(), error: null, fresh: true }),
+        (error) => alive && setState((s) => ({ ...s, key, error, fresh: true })),
+      );
+    }
+    return () => {
+      alive = false;
+    };
+  }, [agent.id, limited, control, tick, key]);
+
+  const current = state.key === key;
+  return {
+    limited,
+    account: state.account,
+    at: state.at,
+    error: current ? state.error : null,
+    updating: limited && control && !(current && state.fresh),
+  };
+}
+
 function Bar({ percent, label, sub }) {
   const p = Math.max(0, Math.min(100, Math.round(percent)));
-  const level = p >= 90 ? 'high' : p >= 70 ? 'mid' : '';
+  const level = levelOf(p);
   return (
     <div className="usage-row">
       <div className="usage-row-head">
@@ -68,41 +123,31 @@ function Bar({ percent, label, sub }) {
   );
 }
 
-function AgentUsage({ agent, control, tick, now }) {
-  const [state, setState] = useState({ tick: -1, account: null, error: null });
-  const limited = agent.type === 'claude' || agent.type === 'codex';
-
-  useEffect(() => {
-    if (!limited || !control) return undefined;
-    let alive = true;
-    api(`/api/agents/${encodeURIComponent(agent.id)}/usage${tick ? '?fresh=1' : ''}`).then(
-      (r) => alive && setState({ tick, account: r.account, error: null }),
-      (error) => alive && setState({ tick, account: null, error }),
-    );
-    return () => {
-      alive = false;
-    };
-  }, [agent.id, limited, control, tick]);
-
-  const loading = state.tick !== tick;
-  const plan = state.account?.plan ?? agent.plan;
+export function AgentUsage({ agent, control, tick, now, bare = false }) {
+  const usage = useAgentUsage(agent, control, tick);
+  const { limited, account } = usage;
+  const plan = account?.plan ?? agent.plan;
   const fill = agent.context?.size ? (agent.context.used / agent.context.size) * 100 : null;
 
   return (
-    <section className="card stack-sm usage-card">
+    <section className={bare ? 'stack-sm' : 'card stack-sm usage-card'}>
       <div className="usage-head">
         <h3>{agent.name}</h3>
         {plan && <span className="pill">{plan}</span>}
       </div>
-      {limited && !control && <p className="muted small">{t('viewModeHint')}</p>}
-      {limited && control && loading && !state.account && <p className="muted small">{t('usage.loading')}</p>}
-      {state.error && <p className="error small">{messageOf(state.error)}</p>}
-      {state.account?.limits.map((l) => (
+      {limited && !control && !account && <p className="muted small">{t('viewModeHint')}</p>}
+      {usage.updating && !account && <p className="muted small">{t('usage.loading')}</p>}
+      {account && usage.at && (
+        <p className="muted small">
+          {t('usage.updated', { ago: ago(usage.at, now) })}
+          {usage.updating && ` · ${t('usage.updating')}`}
+        </p>
+      )}
+      {usage.error && <p className="error small">{messageOf(usage.error)}</p>}
+      {account?.limits.map((l) => (
         <Bar key={l.kind} percent={l.percent} label={windowName(l)} sub={resets(l.resetsAt, now)} />
       ))}
-      {limited && state.account && !state.account.limits.length && (
-        <p className="muted small">{t('usage.noLimits')}</p>
-      )}
+      {limited && account && !account.limits.length && <p className="muted small">{t('usage.noLimits')}</p>}
       {!limited && <p className="muted small">{t('usage.noAccount')}</p>}
       {agent.pid !== null && (agent.model || fill !== null) && (
         <div className="stack-sm usage-session">

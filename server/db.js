@@ -143,6 +143,24 @@ export function setModel(db, agentId, model) {
   setSetting(db, 'models', Object.keys(map).length ? JSON.stringify(map) : null);
 }
 
+/**
+ * The last plan limits of each agent, so the Usage page has something to show at once.
+ * @param {import('better-sqlite3').Database} db @returns {Record<string, { at: number, account: any }>}
+ */
+export function getUsageCache(db) {
+  try {
+    const map = JSON.parse(getSetting(db, 'usage_cache') ?? '{}');
+    return map && typeof map === 'object' ? map : {};
+  } catch {
+    return {};
+  }
+}
+
+/** @param {import('better-sqlite3').Database} db @param {string} agentId @param {{ at: number, account: any }} value */
+export function setUsageCache(db, agentId, value) {
+  setSetting(db, 'usage_cache', JSON.stringify({ ...getUsageCache(db), [agentId]: value }));
+}
+
 /** @param {import('better-sqlite3').Database} db @returns {string[]} */
 export function getAutoApprove(db) {
   try {
