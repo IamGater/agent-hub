@@ -16,7 +16,14 @@ import { clearCookie } from './auth/cookie.js';
 import { listProjects } from './agents/projects.js';
 import { readImage } from './agents/images.js';
 import { SHUTDOWN_DELAY_S } from './agents/power.js';
-import { getAutoApprove, setAutoApprove as saveAutoApprove, setRemoteEnabled } from './db.js';
+import {
+  getAutoApprove,
+  getOnClose,
+  onCloseSchema,
+  setAutoApprove as saveAutoApprove,
+  setOnClose,
+  setRemoteEnabled,
+} from './db.js';
 
 const agentId = z.string().regex(/^[a-z0-9][a-z0-9-]{0,31}$/);
 
@@ -310,6 +317,18 @@ export function apiRoutes(app, ctx, requireAccess) {
   app.post('/api/remote/off', { preHandler: requireAccess }, async (req) => {
     ctx.remoteOff(actorOf(req), authOf(req).local ? 'web-local' : 'web-remote');
     return { ok: true };
+  });
+
+  // What closing the app window does. It is about the window on this computer, so only the
+  // computer changes it; the phone can see it.
+  app.get('/api/settings/on-close', { preHandler: requireAccess }, async () => getOnClose(db));
+  app.post('/api/settings/on-close', { preHandler: requireAccess }, async (req, reply) => {
+    if (!authOf(req).local) return reply.code(403).send({ error: 'local_only' });
+    const parsed = onCloseSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'bad_request' });
+    setOnClose(db, parsed.data);
+    ctx.audit('settings_on_close', actorOf(req), parsed.data);
+    return getOnClose(db);
   });
 
   // Kill switch only needs access: it moves things toward safety, and it must work fast for an

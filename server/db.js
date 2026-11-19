@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { z } from 'zod';
 import Database from 'better-sqlite3';
 
 const SCHEMA = `
@@ -119,6 +120,29 @@ export function setLastFolder(db, agentId, cwd) {
   setSetting(db, 'last_folders', JSON.stringify({ ...getLastFolders(db), [agentId]: cwd }));
 }
 
+/**
+ * The model the owner picked with /model for each agent, kept across sessions.
+ * @param {import('better-sqlite3').Database} db @returns {Record<string, string>}
+ */
+export function getModels(db) {
+  try {
+    const map = JSON.parse(getSetting(db, 'models') ?? '{}');
+    return Object.fromEntries(
+      Object.entries(map).filter(([k, v]) => typeof k === 'string' && typeof v === 'string'),
+    );
+  } catch {
+    return {};
+  }
+}
+
+/** @param {import('better-sqlite3').Database} db @param {string} agentId @param {string | null} model */
+export function setModel(db, agentId, model) {
+  const map = getModels(db);
+  if (model === null) delete map[agentId];
+  else map[agentId] = model;
+  setSetting(db, 'models', Object.keys(map).length ? JSON.stringify(map) : null);
+}
+
 /** @param {import('better-sqlite3').Database} db @returns {string[]} */
 export function getAutoApprove(db) {
   try {
@@ -135,6 +159,39 @@ export function getAutoApprove(db) {
  */
 export function setAutoApprove(db, ids) {
   setSetting(db, 'auto_approve', ids.length ? JSON.stringify(ids) : null);
+}
+
+/**
+ * What happens when the app window on this computer is closed (see agents/autoclose.js).
+ * `agents`: 'keep' lets them work on, 'stop' lets them finish the current answer and stops them.
+ * `exit`: shut the server down once the agents have stopped. `keepForRemote`: while remote access
+ * is on, behave as 'keep'. `waitMinutes`: the longest wait for an answer to finish.
+ */
+export const onCloseSchema = z.strictObject({
+  agents: z.enum(['stop', 'keep']),
+  exit: z.boolean(),
+  keepForRemote: z.boolean(),
+  waitMinutes: z.number().int().min(1).max(240),
+});
+/** @typedef {z.infer<typeof onCloseSchema>} OnClose */
+
+/** @type {OnClose} */
+export const ON_CLOSE_DEFAULTS = { agents: 'stop', exit: true, keepForRemote: false, waitMinutes: 30 };
+
+/** @param {import('better-sqlite3').Database} db @returns {OnClose} */
+export function getOnClose(db) {
+  try {
+    const saved = JSON.parse(getSetting(db, 'on_close') ?? '{}');
+    const merged = onCloseSchema.safeParse({ ...ON_CLOSE_DEFAULTS, ...saved });
+    return merged.success ? merged.data : { ...ON_CLOSE_DEFAULTS };
+  } catch {
+    return { ...ON_CLOSE_DEFAULTS };
+  }
+}
+
+/** @param {import('better-sqlite3').Database} db @param {OnClose} value */
+export function setOnClose(db, value) {
+  setSetting(db, 'on_close', JSON.stringify(onCloseSchema.parse(value)));
 }
 
 /** @param {import('better-sqlite3').Database} db */

@@ -216,6 +216,133 @@ function Permissions({ agents, control }) {
   );
 }
 
+const WAIT_OPTIONS = [5, 15, 30, 60, 120];
+
+function Switch({ on, label, disabled, onChange }) {
+  return (
+    <button
+      className={`toggle ${on ? 'on' : ''}`}
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!on)}
+    >
+      <span />
+    </button>
+  );
+}
+
+/** What closing the app window on this computer does to the agents and the server. */
+function OnClose({ state }) {
+  const [value, setValue] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const local = state.scope === 'local';
+
+  useEffect(() => {
+    let alive = true;
+    api('/api/settings/on-close').then(
+      (v) => alive && setValue(v),
+      (err) => alive && setError(err),
+    );
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  async function save(patch) {
+    const before = value;
+    const next = { ...value, ...patch };
+    setValue(next);
+    setBusy(true);
+    setError(null);
+    try {
+      setValue(await api('/api/settings/on-close', next));
+    } catch (err) {
+      setError(err);
+      setValue(before);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!value) return error ? <p className="error small">{messageOf(error)}</p> : null;
+  const stop = value.agents === 'stop';
+  const off = !local || busy;
+
+  return (
+    <section className="card stack-sm">
+      <h3>{t('close.title')}</h3>
+      <p className="muted small">{t('close.hint')}</p>
+
+      <div className="perm-row">
+        <span>{t('close.agents')}</span>
+        <div className="segmented" role="radiogroup" aria-label={t('close.agents')}>
+          {['keep', 'stop'].map((mode) => (
+            <button
+              key={mode}
+              role="radio"
+              aria-checked={value.agents === mode}
+              className={value.agents === mode ? 'on' : ''}
+              disabled={off}
+              onClick={() => value.agents !== mode && save({ agents: mode })}
+            >
+              {t(`close.${mode}`)}
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="muted small">{stop ? t('close.stopHint') : t('close.keepHint')}</p>
+
+      {stop && (
+        <>
+          <div className="field-row">
+            <span>{t('close.wait')}</span>
+            <select
+              value={value.waitMinutes}
+              disabled={off}
+              aria-label={t('close.wait')}
+              onChange={(e) => save({ waitMinutes: Number(e.target.value) })}
+            >
+              {[...new Set([...WAIT_OPTIONS, value.waitMinutes])]
+                .sort((a, b) => a - b)
+                .map((m) => (
+                  <option key={m} value={m}>
+                    {t('close.minutes', { n: String(m) })}
+                  </option>
+                ))}
+            </select>
+          </div>
+          <div className="field-row">
+            <span>{t('close.remote')}</span>
+            <Switch
+              on={value.keepForRemote}
+              label={t('close.remote')}
+              disabled={off}
+              onChange={(v) => save({ keepForRemote: v })}
+            />
+          </div>
+          <p className="muted small">{t('close.remoteHint')}</p>
+          <div className="field-row">
+            <span>{t('close.exit')}</span>
+            <Switch
+              on={value.exit}
+              label={t('close.exit')}
+              disabled={off}
+              onChange={(v) => save({ exit: v })}
+            />
+          </div>
+          <p className="muted small">{t('close.exitHint')}</p>
+        </>
+      )}
+
+      {!local && <p className="muted small">{t('close.localOnly')}</p>}
+      {error && <p className="error small">{messageOf(error)}</p>}
+    </section>
+  );
+}
+
 /** Turns the computer off after Windows' one-minute notice, which can be cancelled from here. */
 function PowerOff() {
   const [busy, setBusy] = useState(false);
@@ -278,6 +405,7 @@ export default function Settings({ state, onChange, agents, conn }) {
       <h1 className="hero small-hero">{t('settings')}</h1>
       <Language />
       <Permissions agents={agents} control={control} />
+      <OnClose state={state} />
       <PhoneSettings state={state} onChange={onChange} />
       <PowerOff />
     </main>
