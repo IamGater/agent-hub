@@ -3,7 +3,68 @@ import { messageOf } from '../api.js';
 import { has, t } from '../i18n.js';
 import { useAutosize } from '../hooks/useAutosize.js';
 import { useSessions, when } from '../hooks/useSessions.js';
-import { ArrowUp, Stop } from './Icons.jsx';
+import { ArrowUp, Gauge, Stop } from './Icons.jsx';
+import { AgentUsage, useNow } from '../pages/Usage.jsx';
+
+/** 950 -> "950", 12_345 -> "12.3k", 2_400_000 -> "2.4M". */
+export function compact(n) {
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
+  return `${(n / 1_000_000).toFixed(1)}M`;
+}
+
+/** 42_000 -> "0:42", 3_725_000 -> "1:02:05". */
+export function clock(ms) {
+  const sec = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = String(sec % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`;
+}
+
+/** The current time, moving every second while `on`, for running clocks. */
+export function useClock(on) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!on) return undefined;
+    const tick = () => setNow(Date.now());
+    const timer = setInterval(tick, 1000);
+    const first = setTimeout(tick, 0);
+    return () => {
+      clearInterval(timer);
+      clearTimeout(first);
+    };
+  }, [on]);
+  return now;
+}
+
+/** The account's limits for this agent, opened from the button under the message box. */
+function UsagePopover({ agent, control, onClose }) {
+  const box = useRef(null);
+  const now = useNow();
+  useEffect(() => {
+    const away = (e) => {
+      if (!box.current?.contains(e.target) && !e.target.closest?.('.usage-toggle')) onClose();
+    };
+    // Capture: Esc closes this first, and the chat does not take it as "stop".
+    const key = (e) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      onClose();
+    };
+    document.addEventListener('pointerdown', away);
+    document.addEventListener('keydown', key, true);
+    return () => {
+      document.removeEventListener('pointerdown', away);
+      document.removeEventListener('keydown', key, true);
+    };
+  }, [onClose]);
+  return (
+    <div className="usage-pop" ref={box}>
+      <AgentUsage agent={agent} control={control} tick={0} now={now} bare />
+    </div>
+  );
+}
 
 /** "<low|medium|high>" or "[on|off]" lists the values the argument can take. */
 function hintChoices(hint) {
@@ -28,6 +89,8 @@ export default function Composer({ agent, control, wide, commands, onSend, onSto
   const [text, setText] = useState('');
   const [active, setActive] = useState(0);
   const [closed, setClosed] = useState(false);
+  const [usageOpen, setUsageOpen] = useState(false);
+  const clockNow = useClock(agent.busy && Boolean(agent.busySince));
   const input = useRef(null);
   const list = useRef(null);
   useAutosize(input, text);
@@ -139,6 +202,8 @@ export default function Composer({ agent, control, wide, commands, onSend, onSto
       agent.model)
     : null;
   const fill = agent.context?.size ? Math.round((agent.context.used / agent.context.size) * 100) : null;
+  const tokens = agent.tokens;
+  const limited = agent.type === 'claude' || agent.type === 'codex';
 
   let placeholder = t('chat.placeholder');
   if (!running) placeholder = t('agentNotRunning');
@@ -201,16 +266,50 @@ export default function Composer({ agent, control, wide, commands, onSend, onSto
           </button>
         )}
       </form>
-      {(modelName || fill !== null) && (
-        <div className="composer-meta muted small">
-          {modelName && <span title={t('usage.model')}>{modelName}</span>}
-          {fill !== null && (
-            <span title={t('usage.contextHint', { used: agent.context.used, size: agent.context.size })}>
-              {t('usage.context', { percent: fill })}
-            </span>
-          )}
-        </div>
-      )}
+      {usageOpen && <UsagePopover agent={agent} control={control} onClose={() => setUsageOpen(false)} />}
+      <div className="composer-meta muted small">
+        {limited && (
+          <button
+            type="button"
+            className={`usage-toggle ${usageOpen ? 'on' : ''}`}
+            aria-expanded={usageOpen}
+            title={t('usage.title')}
+            onClick={() => setUsageOpen((v) => !v)}
+          >
+            <Gauge size={13} /> {t('usage.title')}
+          </button>
+        )}
+        {modelName && <span title={t('usage.model')}>{modelName}</span>}
+        {fill !== null && (
+          <span title={t('usage.contextHint', { used: agent.context.used, size: agent.context.size })}>
+            {t('usage.context', { percent: fill })}
+          </span>
+        )}
+        {tokens && (
+          <span
+            title={t('tokens.hint', {
+              input: tokens.input.toLocaleString(),
+              cached: tokens.cached.toLocaleString(),
+              output: tokens.output.toLocaleString(),
+            })}
+          >
+            {t('tokens.short', {
+              input: compact(tokens.input + tokens.cached),
+              output: compact(tokens.output),
+            })}
+          </span>
+        )}
+        {agent.busy && agent.busySince ? (
+          <span className="mono" title={t('timer.running')}>
+            ⏱ {clock(clockNow - agent.busySince)}
+          </span>
+        ) : (
+          agent.lastTurnMs !== null &&
+          agent.lastTurnMs !== undefined && (
+            <span title={t('timer.lastHint')}>{t('timer.last', { time: clock(agent.lastTurnMs) })}</span>
+          )
+        )}
+      </div>
     </div>
   );
 }

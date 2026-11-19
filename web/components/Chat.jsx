@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ApiError, messageOf } from '../api.js';
 import { has, t } from '../i18n.js';
-import Composer from './Composer.jsx';
+import Composer, { clock, useClock } from './Composer.jsx';
 import Dropdown from './Dropdown.jsx';
 import { Close, Copy, Forward } from './Icons.jsx';
 import Markdown from './Markdown.jsx';
@@ -235,6 +235,19 @@ function Lightbox({ image, onClose }) {
   );
 }
 
+/** The dots while the agent works, with how long this answer has taken so far. */
+function Thinking({ since }) {
+  const now = useClock(Boolean(since));
+  return (
+    <div className="thinking" aria-label={t('chat.working')}>
+      <span />
+      <span />
+      <span />
+      {since && <em className="thinking-time mono">{clock(now - since)}</em>}
+    </div>
+  );
+}
+
 export default function Chat({ agent, agents, conn, control, wide, blocked }) {
   const { items, commands } = useChat(agent.id, conn.listen);
   const scroller = useRef(null);
@@ -321,13 +334,7 @@ export default function Chat({ agent, agents, conn, control, wide, blocked }) {
               onUnqueue={onUnqueue}
             />
           ))}
-          {agent.busy && agent.status !== 'waiting' && (
-            <div className="thinking" aria-label={t('chat.working')}>
-              <span />
-              <span />
-              <span />
-            </div>
-          )}
+          {agent.busy && agent.status !== 'waiting' && <Thinking since={agent.busySince} />}
         </div>
       </div>
       <div className="chat-bottom">
