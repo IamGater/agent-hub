@@ -135,6 +135,13 @@ export const Close = (p) => (
   </Svg>
 );
 
+export const PanelLeft = (p) => (
+  <Svg {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M9 4v16" />
+  </Svg>
+);
+
 export function BrandMark() {
   return <img className="brand-mark" src="/favicon.svg" alt="" width="28" height="28" />;
 }

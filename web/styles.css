@@ -70,6 +70,14 @@ body,
   -webkit-font-smoothing: antialiased;
 }
 
+/* Installed app: the window's title bar takes the sidebar color (theme-color); a hairline keeps it
+   apart from the page below. */
+@media (display-mode: standalone) {
+  #root {
+    border-top: 1px solid var(--line);
+  }
+}
+
 h1,
 h2,
 h3 {
@@ -366,17 +374,104 @@ textarea:focus {
 
 .sidebar {
   flex: none;
-  width: 272px;
+  width: 236px;
   display: flex;
   flex-direction: column;
   background: var(--sidebar);
   border-right: 1px solid var(--line);
-  padding: 14px 10px;
+  padding: 10px 8px;
+  transition: width 0.15s;
+}
+
+.side-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 0 0 8px;
 }
 
 .sidebar .brand {
-  padding: 4px 8px 14px;
+  min-width: 0;
+  padding: 4px 6px;
+  font-size: 1.05rem;
   text-align: left;
+  white-space: nowrap;
+}
+
+.side-toggle {
+  flex: none;
+  color: var(--muted);
+}
+
+.agent-initials {
+  display: none;
+}
+
+/* Collapsed: a rail of icons; names and labels are in the tooltips. */
+.sidebar.collapsed {
+  width: 60px;
+  padding: 10px 6px;
+}
+
+.sidebar.collapsed .side-head {
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sidebar.collapsed .brand-name,
+.sidebar.collapsed .side-section,
+.sidebar.collapsed .agent-item-text,
+.sidebar.collapsed .nav-label {
+  display: none;
+}
+
+.sidebar.collapsed .agent-item {
+  position: relative;
+  justify-content: center;
+  padding: 6px 0;
+}
+
+.sidebar.collapsed .agent-item .dot {
+  position: absolute;
+  top: 5px;
+  right: 7px;
+  width: 7px;
+  height: 7px;
+}
+
+.sidebar.collapsed .agent-initials {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: var(--hover);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.sidebar.collapsed .agent-item.active .agent-initials {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.sidebar.collapsed .nav-item {
+  justify-content: center;
+  padding: 0;
+}
+
+.sidebar.collapsed .side-foot {
+  align-items: center;
+}
+
+.sidebar.collapsed .nav-links {
+  align-self: stretch;
+}
+
+.compact-toggle {
+  margin: 2px 0;
 }
 
 .side-section {
@@ -411,7 +506,7 @@ textarea:focus {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 10px;
+  padding: 6px 10px;
   border-radius: 10px;
   text-align: left;
 }
@@ -461,7 +556,7 @@ textarea:focus {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 38px;
+  min-height: 34px;
   padding: 0 10px;
   border-radius: 10px;
   text-align: left;
@@ -1616,6 +1711,33 @@ h4 {
 .msg-action:hover {
   background: var(--hover);
   color: var(--text);
+}
+
+.msg.user.queued {
+  opacity: 0.75;
+  border: 1px dashed var(--line-strong);
+}
+
+.msg.user.dropped {
+  opacity: 0.5;
+}
+
+.msg-queue {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.msg-unqueue {
+  color: var(--accent);
+  font-size: 0.78rem;
+}
+
+.msg-unqueue:hover {
+  text-decoration: underline;
 }
 
 .msg.user.relayed {

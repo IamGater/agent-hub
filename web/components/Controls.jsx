@@ -26,11 +26,30 @@ function useAction(onChange) {
 
 // Turning remote access on only works at the computer; turning it off is one tap from anywhere.
 // Agents keep running either way.
-export function RemoteSwitch({ state, onChange }) {
+export function RemoteSwitch({ state, onChange, compact = false }) {
   const { busy, error, run } = useAction(onChange);
   const { scope, remote } = state;
   if (!remote.configured) return null;
   const off = () => run(() => api('/api/remote/off', {}));
+
+  // Collapsed sidebar: only the switch, the state is in its tooltip.
+  if (compact) {
+    if (scope !== 'local') return null;
+    const label = `${t('remoteAccess')}: ${remote.enabled ? t('remoteOn') : t('remoteOff')}`;
+    return (
+      <button
+        className={`toggle compact-toggle ${remote.enabled ? 'on' : ''}`}
+        role="switch"
+        aria-checked={remote.enabled}
+        aria-label={label}
+        title={label}
+        disabled={busy}
+        onClick={() => (remote.enabled ? off() : run(() => dangerous({ type: 'remote-on' })))}
+      >
+        <span />
+      </button>
+    );
+  }
 
   return (
     <div className="remote">
@@ -119,27 +138,33 @@ export function NavLinks({ state, onChange, route }) {
     <nav className="nav-links">
       <button
         className={`nav-item ${route?.page === 'settings' ? 'active' : ''}`}
+        title={t('settings')}
         onClick={() => navigate('/settings')}
       >
-        <Gear size={16} /> {t('settings')}
+        <Gear size={16} /> <span className="nav-label">{t('settings')}</span>
       </button>
       <button
         className={`nav-item ${route?.page === 'usage' ? 'active' : ''}`}
+        title={t('usage.title')}
         onClick={() => navigate('/usage')}
       >
-        <Gauge size={16} /> {t('usage.title')}
+        <Gauge size={16} /> <span className="nav-label">{t('usage.title')}</span>
       </button>
       {state.scope === 'remote' && (
-        <button className="nav-item" onClick={() => run(() => api('/api/logout', {}))}>
-          <Logout size={16} /> {t('logout')}
+        <button className="nav-item" title={t('logout')} onClick={() => run(() => api('/api/logout', {}))}>
+          <Logout size={16} /> <span className="nav-label">{t('logout')}</span>
         </button>
       )}
       <ConfirmButton
         className="nav-item danger"
         onConfirm={() => run(() => api('/api/killall', {}))}
-        armedLabel={t('killAllArmed')}
+        armedLabel={
+          <>
+            <Power size={16} /> <span className="nav-label">{t('killAllArmed')}</span>
+          </>
+        }
       >
-        <Power size={16} /> {t('killAll')}
+        <Power size={16} /> <span className="nav-label">{t('killAll')}</span>
       </ConfirmButton>
       {error && <p className="error small">{error}</p>}
     </nav>
