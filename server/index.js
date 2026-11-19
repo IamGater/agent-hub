@@ -3,11 +3,21 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApp } from './app.js';
 import { loadAgents, loadConfig } from './config/load.js';
-import { getAutoApprove, getLastFolders, isRemoteEnabled, openDb, setLastFolder } from './db.js';
+import {
+  getAutoApprove,
+  getLastFolders,
+  getModels,
+  getOnClose,
+  isRemoteEnabled,
+  openDb,
+  setLastFolder,
+  setModel,
+} from './db.js';
 import { createManager } from './sessions/manager.js';
 import { createNotifier } from './audit/notify.js';
 import { audit } from './audit/log.js';
 import { forgetPid, killRecorded, recordPid } from './agents/pids.js';
+import { createAutoClose } from './agents/autoclose.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const configFile = process.argv[2] ?? path.join(root, 'config.json');
@@ -26,6 +36,8 @@ const manager = createManager({
   stillAutoApproved: (id) => getAutoApprove(db).includes(id),
   lastFolders: getLastFolders(db),
   onFolder: (id, cwd) => setLastFolder(db, id, cwd),
+  savedModels: getModels(db),
+  onModel: (id, model) => setModel(db, id, model),
 });
 const webRoot = path.join(root, 'web', 'dist');
 const hasWeb = fs.existsSync(path.join(webRoot, 'index.html'));
@@ -67,7 +79,10 @@ if (config.scopes.remote) {
   );
 }
 
+let closing = false;
 async function shutdown() {
+  if (closing) return;
+  closing = true;
   await manager.stopAll();
   await app.close();
   db.close();
@@ -75,3 +90,13 @@ async function shutdown() {
 }
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
+
+// What closing the app window does is the owner's choice (Settings), see agents/autoclose.js.
+const autoClose = createAutoClose({
+  manager,
+  settings: () => getOnClose(db),
+  remoteOn: () => isRemoteEnabled(db),
+  onExit: shutdown,
+  log: { info: (msg) => app.log.info(msg) },
+});
+ctx.onLocalWindows = (n) => autoClose.windows(n);

@@ -52,6 +52,8 @@ export function attachWs(ctx) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024, perMessageDeflate: false });
   /** @type {Map<import('ws').WebSocket, Conn>} */
   const conns = new Map();
+  const localChanged = () =>
+    ctx.onLocalWindows?.([...conns.values()].filter((c) => c.scope === 'local').length);
 
   /**
    * The computer itself is always in control. A remote connection re-reads its session, so
@@ -128,10 +130,14 @@ export function attachWs(ctx) {
         take: createBudget({ now: ctx.now, max: 200, windowMs: 10_000 }),
       };
       conns.set(ws, conn);
+      if (scopeName === 'local') localChanged();
       ws.on('pong', () => {
         conn.alive = true;
       });
-      ws.on('close', () => conns.delete(ws));
+      ws.on('close', () => {
+        conns.delete(ws);
+        if (scopeName === 'local') localChanged();
+      });
       ws.on('error', (err) => ctx.log.warn({ err: err.message }, 'ws error'));
       ws.on('message', (data, isBinary) => onMessage(ws, conn, data, isBinary));
       send(ws, {
@@ -214,6 +220,7 @@ export function attachWs(ctx) {
       case 'chat-send':
       case 'chat-answer':
       case 'chat-interrupt':
+      case 'chat-unqueue':
       case 'chat-link':
       case 'chat-unlink': {
         if (mode !== 'control') return send(ws, { type: 'error', code: 'view_mode' });
@@ -242,6 +249,8 @@ export function attachWs(ctx) {
           const refused = manager.link(msg.agentId, msg.peer, msg.hops);
           if (refused) return send(ws, { type: 'error', code: refused });
           ctx.audit('link', actor(conn), { agentId: msg.agentId, peer: msg.peer, hops: msg.hops });
+        } else if (msg.type === 'chat-unqueue') {
+          manager.unqueue(msg.agentId, msg.itemId);
         } else if (msg.type === 'chat-unlink') {
           manager.unlink(msg.agentId);
           ctx.audit('unlink', actor(conn), { agentId: msg.agentId });

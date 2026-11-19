@@ -47,6 +47,7 @@ import { attachWs } from './ws/server.js';
  *     closeScope: (scope: Scope['name']) => void,
  *     shutdown: () => void,
  *   },
+ *   onLocalWindows?: (count: number) => void,
  * }} Ctx
  */
 
