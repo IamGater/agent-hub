@@ -9,11 +9,13 @@ import {
   getLastFolders,
   getModels,
   getOnClose,
+  getRates,
   getUsageCache,
   isRemoteEnabled,
   openDb,
   setLastFolder,
   setModel,
+  setRates,
   setUsageCache,
 } from './db.js';
 import { createManager } from './sessions/manager.js';
@@ -43,6 +45,9 @@ const manager = createManager({
   onModel: (id, model) => setModel(db, id, model),
   savedUsage: getUsageCache(db),
   onUsage: (id, usage) => setUsageCache(db, id, usage),
+  savedRates: getRates(db),
+  onRates: (all) => setRates(db, all),
+  backgroundUsage: true,
 });
 const webRoot = path.join(root, 'web', 'dist');
 const hasWeb = fs.existsSync(path.join(webRoot, 'index.html'));

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { messageOf } from '../api.js';
-import { has, t } from '../i18n.js';
+import { has, locale, t } from '../i18n.js';
+import { costLabel, percentText, resumeWarning } from '../resumeCost.js';
 import { useAutosize } from '../hooks/useAutosize.js';
 import { useSessions, when } from '../hooks/useSessions.js';
 import { ArrowUp, Gauge, Stop } from './Icons.jsx';
@@ -85,8 +86,40 @@ function describe(agent, c) {
   return agent.type === 'codex' && has(`codexcmd.${c.name}`) ? t(`codexcmd.${c.name}`) : c.description;
 }
 
-export default function Composer({ agent, control, wide, commands, onSend, onStop, blocked }) {
+/** "45.2k tokens · ≈2%": what the answer in progress (or the last one) has spent. */
+function TurnSpend({ agent }) {
+  const tk = agent.turnTokens;
+  if (!tk) return null;
+  const total = tk.input + tk.cached + tk.output;
+  if (!total) return null;
+  const pct = typeof agent.turnPercent === 'number' ? ` · ≈${percentText(agent.turnPercent)}%` : '';
+  return (
+    <span
+      title={t('turn.hint', {
+        input: tk.input.toLocaleString(),
+        cached: tk.cached.toLocaleString(),
+        output: tk.output.toLocaleString(),
+      })}
+    >
+      {t('turn.tokens', { tokens: compact(total) })}
+      {pct}
+    </span>
+  );
+}
+
+export default function Composer({
+  agent,
+  control,
+  wide,
+  commands,
+  onSend,
+  onStop,
+  onCancelContinue,
+  blocked,
+}) {
   const [text, setText] = useState('');
+  // "/resume <long session>" asks first: the next message sends the whole conversation again.
+  const [confirm, setConfirm] = useState(null);
   const [active, setActive] = useState(0);
   const [closed, setClosed] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
@@ -119,7 +152,12 @@ export default function Composer({ agent, control, wide, commands, onSend, onSto
   } else if (command) {
     let choices = command.options ?? hintChoices(command.hint);
     if (command.dynamic === 'sessions') {
-      choices = sessions.list?.map((s) => ({ value: s.id, label: s.title, sub: when(s.updatedAt) })) ?? null;
+      choices =
+        sessions.list?.map((s) => ({
+          value: s.id,
+          label: s.title,
+          sub: [when(s.updatedAt), costLabel(s)].filter(Boolean).join(' · '),
+        })) ?? null;
       if (sessions.loading) note = t('chat.sessionsLoading');
       else if (sessions.error) note = messageOf(sessions.error);
       else if (!choices?.length) note = t('chat.noSessions');
@@ -154,6 +192,13 @@ export default function Composer({ agent, control, wide, commands, onSend, onSto
     e?.preventDefault();
     const value = text.trim();
     if (!value || !enabled) return;
+    const resume = /^\/resume\s+(\S+)$/.exec(value);
+    const warning = resume ? resumeWarning(sessions.list?.find((s) => s.id === resume[1])) : null;
+    if (warning && confirm?.text !== value) {
+      setConfirm({ text: value, warning });
+      return;
+    }
+    setConfirm(null);
     onSend(value);
     setText('');
     setClosed(false);
@@ -212,7 +257,20 @@ export default function Composer({ agent, control, wide, commands, onSend, onSto
 
   return (
     <div className="composer-wrap">
-      {(shown || note) && (
+      {confirm && (
+        <div className="commands resume-confirm stack-sm" role="alert">
+          <p className="small">{confirm.warning}</p>
+          <div className="resume-confirm-actions">
+            <button type="button" className="btn" onClick={() => setConfirm(null)}>
+              {t('resume.cancel')}
+            </button>
+            <button type="button" className="btn primary" onClick={() => submit()}>
+              {t('resume.confirm')}
+            </button>
+          </div>
+        </div>
+      )}
+      {!confirm && (shown || note) && (
         <div className="commands">
           {note && <p className="cmd-note">{note}</p>}
           {shown && (
@@ -247,6 +305,7 @@ export default function Composer({ agent, control, wide, commands, onSend, onSto
             setText(e.target.value);
             setClosed(false);
             setActive(0);
+            setConfirm(null);
           }}
           onKeyDown={onKeyDown}
           placeholder={placeholder}
@@ -308,6 +367,24 @@ export default function Composer({ agent, control, wide, commands, onSend, onSto
           agent.lastTurnMs !== undefined && (
             <span title={t('timer.lastHint')}>{t('timer.last', { time: clock(agent.lastTurnMs) })}</span>
           )
+        )}
+        <TurnSpend agent={agent} />
+        {agent.continueAt && (
+          <span className="continue-wait">
+            <span title={t('limit.waitHint')}>
+              {t('limit.wait', {
+                time: new Date(agent.continueAt).toLocaleTimeString(locale(), {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                }),
+              })}
+            </span>
+            {onCancelContinue && (
+              <button type="button" className="link-btn" onClick={onCancelContinue}>
+                {t('limit.cancel')}
+              </button>
+            )}
+          </span>
         )}
       </div>
     </div>

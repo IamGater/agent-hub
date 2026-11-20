@@ -161,6 +161,24 @@ export function setUsageCache(db, agentId, value) {
   setSetting(db, 'usage_cache', JSON.stringify({ ...getUsageCache(db), [agentId]: value }));
 }
 
+/**
+ * What was learned about each account's limit: tokens per percent (see sessions/rate.js).
+ * @param {import('better-sqlite3').Database} db @returns {Record<string, any>}
+ */
+export function getRates(db) {
+  try {
+    const map = JSON.parse(getSetting(db, 'usage_rates') ?? '{}');
+    return map && typeof map === 'object' ? map : {};
+  } catch {
+    return {};
+  }
+}
+
+/** @param {import('better-sqlite3').Database} db @param {Record<string, any>} all */
+export function setRates(db, all) {
+  setSetting(db, 'usage_rates', JSON.stringify(all));
+}
+
 /** @param {import('better-sqlite3').Database} db @returns {string[]} */
 export function getAutoApprove(db) {
   try {

@@ -1,7 +1,7 @@
 // @ts-check
 import { randomUUID } from 'node:crypto';
 import { killTree } from '../../agents/kill.js';
-import { noticeItem, parseCommand, startJsonProcess, str } from './process.js';
+import { LIMIT_TEXT, noticeItem, parseCommand, startJsonProcess, str } from './process.js';
 
 // Commands that change settings directly, without a tool call the owner would see as a card:
 // "/config" can add permission allow rules, "/auto-mode-setup" configures auto-approval.
@@ -125,6 +125,59 @@ export function startClaude(opts) {
 
   /** Tokens spent in this run, summed over the answers. */
   const tokens = { input: 0, output: 0, cached: 0 };
+  /** Usage of each model call of the answer in progress, by message id (blocks repeat it). */
+  /** @type {Map<string, { input: number, output: number, cached: number }>} */
+  let turnCalls = new Map();
+  /** While a resumed history is shown: its usage was spent long ago. */
+  let replaying = false;
+  /** Set during an answer when the plan limit stopped it: when the limit comes back (ms), or null. */
+  /** @type {{ resetsAt: number | null } | null} */
+  let limited = null;
+
+  const n = (/** @type {unknown} */ v) => (typeof v === 'number' && v > 0 ? v : 0);
+
+  /** @param {any} msg */
+  function countCall(msg) {
+    const u = msg.message?.usage;
+    if (replaying || !u || typeof u !== 'object' || typeof msg.message?.id !== 'string') return;
+    turnCalls.set(msg.message.id, {
+      input: n(u.input_tokens) + n(u.cache_creation_input_tokens),
+      cached: n(u.cache_read_input_tokens),
+      output: n(u.output_tokens),
+    });
+    const sum = { input: 0, output: 0, cached: 0 };
+    for (const c of turnCalls.values()) {
+      sum.input += c.input;
+      sum.cached += c.cached;
+      sum.output += c.output;
+    }
+    hooks.meta({ turnTokens: sum });
+  }
+
+  /** "Claude AI usage limit reached|1731600000" carries the reset time in seconds. @param {string} text */
+  function limitFrom(text) {
+    if (!LIMIT_TEXT.test(text)) return false;
+    const at = /\|(\d{9,11})/.exec(text);
+    limited = { resetsAt: at ? Number(at[1]) * 1000 : (limited?.resetsAt ?? null) };
+    return true;
+  }
+
+  /** @param {any} info */
+  function onRateLimit(info) {
+    if (!info || typeof info !== 'object') return;
+    const five = info.unifiedWindows?.five_hour;
+    /** @param {unknown} u fraction (0..1) or percent */
+    const pct = (u) => (typeof u === 'number' ? (u <= 1 ? u * 100 : u) : null);
+    const sec = (/** @type {unknown} */ v) => (typeof v === 'number' && v > 0 ? v * 1000 : null);
+    const reading =
+      five && pct(five.utilization) !== null
+        ? { percent: /** @type {number} */ (pct(five.utilization)), resetsAt: sec(five.resetsAt) }
+        : info.rateLimitType === 'five_hour' && pct(info.utilization) !== null
+          ? { percent: /** @type {number} */ (pct(info.utilization)), resetsAt: sec(info.resetsAt) }
+          : null;
+    if (reading && !replaying) hooks.meta({ window: reading });
+    if (info.status === 'rejected' && !info.isUsingOverage) limited = { resetsAt: sec(info.resetsAt) };
+  }
 
   /** @param {any} msg */
   function onMessage(msg) {
@@ -133,6 +186,11 @@ export function startClaude(opts) {
         const model = msg.message?.model;
         if (typeof model === 'string' && !model.startsWith('<')) hooks.meta({ model: model.slice(0, 80) });
         const blocks = Array.isArray(msg.message?.content) ? msg.message.content : [];
+        if (model === '<synthetic>' && !replaying) {
+          for (const b of blocks) if (b?.type === 'text' && typeof b.text === 'string') limitFrom(b.text);
+        } else {
+          countCall(msg);
+        }
         blocks.forEach((/** @type {any} */ b, /** @type {number} */ i) => {
           if (b?.type === 'text' && b.text) {
             hooks.item({ id: `${msg.message.id}:${i}`, kind: 'assistant', ts: now(), text: b.text });
@@ -164,10 +222,17 @@ export function startClaude(opts) {
         }
         return;
       }
-      case 'result':
+      case 'rate_limit_event':
+        onRateLimit(msg.rate_limit_info);
+        return;
+      case 'result': {
+        if (msg.is_error || (msg.subtype && msg.subtype !== 'success')) {
+          limitFrom(str(msg.result ?? msg.errors ?? '', 2000));
+        }
+        const stop = limited;
+        limited = null;
         if (msg.usage && typeof msg.usage === 'object') {
           const u = msg.usage;
-          const n = (/** @type {unknown} */ v) => (typeof v === 'number' && v > 0 ? v : 0);
           tokens.input += n(u.input_tokens) + n(u.cache_creation_input_tokens);
           tokens.cached += n(u.cache_read_input_tokens);
           tokens.output += n(u.output_tokens);
@@ -190,7 +255,9 @@ export function startClaude(opts) {
             vars: { message: str(msg.result ?? msg.errors ?? msg.subtype, 2000) },
           });
         }
+        if (stop) hooks.limit(stop.resetsAt);
         return;
+      }
       case 'control_request':
         onControl(msg);
         return;
@@ -305,6 +372,7 @@ export function startClaude(opts) {
     onMessage,
   );
   // A resumed session is shown from Claude's own session file; each line holds one content block.
+  replaying = true;
   for (const line of opts.history ?? []) {
     const content = line.message?.content;
     const key = String(line.uuid ?? randomUUID());
@@ -324,6 +392,7 @@ export function startClaude(opts) {
       onMessage(line);
     }
   }
+  replaying = false;
 
   proc.write({ type: 'control_request', request_id: initId, request: { subtype: 'initialize' } });
 
@@ -363,6 +432,8 @@ export function startClaude(opts) {
         message: { role: 'user', content: text },
       });
       if (!ok) return 'not_running';
+      turnCalls = new Map();
+      limited = null;
       hooks.busy(true);
       return null;
     },

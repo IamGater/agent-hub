@@ -2227,3 +2227,43 @@ h4 {
   background: var(--hover);
   font-weight: 600;
 }
+
+/* Asking before resuming a long session */
+
+.resume-confirm p {
+  margin: 0;
+}
+
+.commands.resume-confirm {
+  padding: 12px;
+}
+
+.resume-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Waiting for the usage limit to reset */
+
+.continue-wait {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--accent);
+}
+
+.link-btn {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.link-btn:hover {
+  color: var(--text);
+}

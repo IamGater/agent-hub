@@ -4,13 +4,15 @@ import os from 'node:os';
 import path from 'node:path';
 
 /**
- * A past conversation the owner can resume.
- * @typedef {{ id: string, title: string, updatedAt: number }} SessionInfo
+ * A past conversation the owner can resume. `tokens`: how big its context was at the end, when the
+ * agent's files tell (what resuming it sends again).
+ * @typedef {{ id: string, title: string, updatedAt: number, tokens?: number }} SessionInfo
  */
 
 export const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9-]{7,63}$/;
 const LIST_MAX = 30;
 const HEAD_BYTES = 256 * 1024;
+const TAIL_BYTES = 512 * 1024;
 const HISTORY_MAX_BYTES = 32 * 1024 * 1024;
 
 /** @param {Record<string, string>} env */
@@ -63,6 +65,45 @@ function readLines(file, max) {
 }
 
 /**
+ * The context size at the end of a session: the usage of its last answer covers everything that was
+ * sent with it, plus what it wrote. Read from the end of the file only.
+ * @param {string} file @returns {number | null}
+ */
+export function claudeContextTokens(file) {
+  let text;
+  const fd = fs.openSync(file, 'r');
+  try {
+    const size = fs.fstatSync(fd).size;
+    const len = Math.min(size, TAIL_BYTES);
+    const buf = Buffer.alloc(len);
+    fs.readSync(fd, buf, 0, len, size - len);
+    text = buf.toString('utf8');
+  } finally {
+    fs.closeSync(fd);
+  }
+  const lines = text.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i].includes('"usage"')) continue;
+    let l;
+    try {
+      l = JSON.parse(lines[i]);
+    } catch {
+      continue;
+    }
+    const u = l?.type === 'assistant' && !l.isSidechain ? l.message?.usage : null;
+    if (!u || l.message?.model === '<synthetic>') continue;
+    const n = (/** @type {unknown} */ v) => (typeof v === 'number' && v > 0 ? v : 0);
+    const total =
+      n(u.input_tokens) +
+      n(u.cache_creation_input_tokens) +
+      n(u.cache_read_input_tokens) +
+      n(u.output_tokens);
+    if (total > 0) return total;
+  }
+  return null;
+}
+
+/**
  * Claude Code has no listing request in its stream protocol, so its own session files are read.
  * @param {string} configDir @param {string} cwd
  * @returns {SessionInfo[]}
@@ -80,9 +121,18 @@ export function claudeSessions(configDir, cwd) {
     .sort((a, b) => b.mtime - a.mtime)
     .slice(0, LIST_MAX)
     .flatMap(({ n, mtime }) => {
-      const first = readLines(path.join(dir, n), HEAD_BYTES).find(isOwnerMessage);
+      const file = path.join(dir, n);
+      const first = readLines(file, HEAD_BYTES).find(isOwnerMessage);
       if (!first) return [];
-      return [{ id: n.slice(0, -6), title: userText(first.message.content).slice(0, 120), updatedAt: mtime }];
+      const tokens = claudeContextTokens(file);
+      return [
+        {
+          id: n.slice(0, -6),
+          title: userText(first.message.content).slice(0, 120),
+          updatedAt: mtime,
+          ...(tokens ? { tokens } : {}),
+        },
+      ];
     });
 }
 

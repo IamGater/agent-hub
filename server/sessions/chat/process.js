@@ -11,15 +11,22 @@ import { killTree } from '../../agents/kill.js';
  *   waiting: (prompt: string | null) => void,
  *   commands: (list: Command[]) => void,
  *   meta: (patch: Meta) => void,
+ *   limit: (resetsAt: number | null) => void,
  *   warn: (message: string) => void,
  * }} Hooks
+ *
+ * `limit`: the answer just ended because the account's plan limit ran out; `resetsAt` (ms) is when
+ * it comes back, if the agent said.
  *
  * What the agent reports about itself while it runs: the model in use, how full the context is
  * (tokens), the plan of the account it is signed in with, and the tokens this session has spent so
  * far (`cached`: input read from the prompt cache, counted apart since it costs far less).
  * @typedef {{ input: number, output: number, cached: number }} Tokens
+ * `turnTokens`: spent by the answer in progress (or the last one), updated while it runs.
+ * `window`: a reading of the account's short limit (percent used), passed on as the agent sees it.
  * @typedef {{
  *   model?: string, context?: { used: number, size: number }, plan?: string, tokens?: Tokens,
+ *   turnTokens?: Tokens, window?: { percent: number, resetsAt: number | null },
  * }} Meta
  *
  * Account limits: `percent` used of a window of `windowMins`, resetting at `resetsAt` (ms).
@@ -193,7 +200,18 @@ export const NOTICES = {
   relay_on: 'Linked with {agent}: answers go back and forth, at most {hops} more messages.',
   relay_off: 'The link with {agent} ended.',
   relay_failed: 'Could not pass the answer to {agent}: {reason}.',
+  limit_wait: 'The usage limit ran out. The agent continues by itself at {at}.',
+  limit_continue: 'The limit has reset: continuing.',
+  limit_gave_up: 'The limit still has not reset after several tries; continue by hand when it does.',
+  limit_cancelled: 'Automatic continue cancelled.',
 };
+
+/** What the agent is told when it continues by itself after the limit came back. */
+export const CONTINUE_TEXT = 'The usage limit has reset. Continue where you left off.';
+
+/** Plan-limit messages of Claude Code and Codex (not the short "rate limited, retrying" ones). */
+export const LIMIT_TEXT =
+  /usage limit|limit reached|hit your (?:usage |session |weekly )?limit|out of (?:extra )?usage|usagelimitexceeded/i;
 
 /**
  * @param {keyof typeof NOTICES} code

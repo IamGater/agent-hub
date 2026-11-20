@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ApiError, messageOf } from '../api.js';
-import { has, t } from '../i18n.js';
+import { has, locale, t } from '../i18n.js';
 import Composer, { clock, useClock } from './Composer.jsx';
 import Dropdown from './Dropdown.jsx';
 import { Close, Copy, Forward } from './Icons.jsx';
@@ -60,7 +60,16 @@ function useChat(agentId, listen) {
 
 /** Server notices carry a code so they show in the owner's language; unknown codes keep the text. */
 function noticeText(item) {
-  return item.code && has(`notice.${item.code}`) ? t(`notice.${item.code}`, item.vars) : item.text;
+  if (!item.code || !has(`notice.${item.code}`)) return item.text;
+  const vars = { ...item.vars };
+  // Times come as ISO strings and are shown in the owner's own clock.
+  if (item.code === 'limit_wait' && vars.at) {
+    const at = new Date(vars.at);
+    if (!Number.isNaN(at.getTime())) {
+      vars.at = at.toLocaleString(locale(), { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+    }
+  }
+  return t(`notice.${item.code}`, vars);
 }
 
 function Approval({ item, control, onAnswer }) {

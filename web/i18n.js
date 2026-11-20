@@ -107,6 +107,12 @@ const ru = {
   'timer.running': 'Сколько идёт этот ответ',
   'timer.last': 'ответ за {time}',
   'timer.lastHint': 'Сколько занял последний ответ',
+  'turn.tokens': '{tokens} ток.',
+  'turn.hint':
+    'Потрачено этим ответом (или последним). Вход: {input}, из кэша: {cached}, выход: {output}. Процент — примерная доля 5-часового лимита.',
+  'limit.wait': '⏸ продолжит в {time}',
+  'limit.waitHint': 'Лимит закончился. Когда он обновится, агент сам продолжит работу.',
+  'limit.cancel': 'не продолжать',
   'usage.hint':
     'Лимиты тарифа каждого аккаунта и, для запущенных агентов, модель и заполненность контекста. Чтобы узнать лимиты, сервер на секунду запускает программу агента, ничего не отправляя модели.',
   'usage.refresh': 'Обновить',
@@ -129,6 +135,14 @@ const ru = {
   'chat.noSessions': 'В этой папке прошлых сессий нет.',
   'resume.button': 'Продолжить',
   'resume.title': 'Продолжить прошлую сессию',
+  'resume.tokens': '{tokens} ток.',
+  'resume.costPercent':
+    'Восстановление этой сессии будет стоить ≈{percent}% вашего usage (5-часового лимита): первое сообщение заново отправит весь разговор — {tokens} токенов.',
+  'resume.costTokens':
+    'Это длинный разговор: первое сообщение после восстановления заново отправит его целиком — {tokens} токенов. Долю лимита хаб покажет, когда соберёт статистику расхода этого аккаунта.',
+  'resume.warm': 'Сессия использовалась только что, кэш ещё тёплый — выйдет дешевле.',
+  'resume.confirm': 'Восстановить',
+  'resume.cancel': 'Отмена',
   'perm.title': 'Права агентов',
   'perm.hint':
     '«Спрашивать»: каждое действие агента ждёт вашего подтверждения. «Разрешить всё»: сервер сам подтверждает каждое действие; они по-прежнему видны в чате и в журнале. Kill switch возвращает всех к «Спрашивать».',
@@ -202,6 +216,11 @@ const ru = {
   'notice.relay_on': 'Связан с {agent}: ответы идут туда и обратно, ещё не больше {hops} сообщений.',
   'notice.relay_off': 'Связь с {agent} завершена.',
   'notice.relay_failed': 'Не удалось передать ответ агенту {agent}: {reason}.',
+  'notice.limit_wait': 'Лимит закончился. Агент сам продолжит работу {at}.',
+  'notice.limit_continue': 'Лимит обновился — продолжаю.',
+  'notice.limit_gave_up':
+    'После нескольких попыток лимит так и не обновился. Продолжите вручную, когда он вернётся.',
+  'notice.limit_cancelled': 'Автопродолжение отменено.',
 
   'codexcmd.compact': 'Сжать историю разговора, чтобы освободить контекст',
   'codexcmd.review': 'Ревью незакоммиченных изменений или по вашей инструкции',
@@ -379,6 +398,12 @@ const en = {
   'timer.running': 'How long this answer has taken',
   'timer.last': 'answered in {time}',
   'timer.lastHint': 'How long the last answer took',
+  'turn.tokens': '{tokens} tokens',
+  'turn.hint':
+    'Spent by this answer (or the last one). Input: {input}, from cache: {cached}, output: {output}. The percent is an estimated share of the 5-hour limit.',
+  'limit.wait': '⏸ continues at {time}',
+  'limit.waitHint': 'The usage limit ran out. When it resets, the agent continues by itself.',
+  'limit.cancel': "don't continue",
   'usage.hint':
     "Plan limits of each account and, for running agents, the model and how full the context is. To read the limits the server starts the agent's program for a second; nothing is sent to the model.",
   'usage.refresh': 'Refresh',
@@ -401,6 +426,14 @@ const en = {
   'chat.noSessions': 'No past sessions in this folder.',
   'resume.button': 'Resume',
   'resume.title': 'Resume a past session',
+  'resume.tokens': '{tokens} tokens',
+  'resume.costPercent':
+    'Resuming this session will cost ≈{percent}% of your usage (5-hour limit): the first message sends the whole conversation again, {tokens} tokens.',
+  'resume.costTokens':
+    'This is a long conversation: the first message after resuming sends all of it again, {tokens} tokens. The share of your limit shows once the hub has seen how this account spends.',
+  'resume.warm': 'It was used moments ago and the cache is still warm, so it costs less.',
+  'resume.confirm': 'Resume',
+  'resume.cancel': 'Cancel',
   'perm.title': 'Agent permissions',
   'perm.hint':
     '"Ask": every action waits for your approval. "Allow all": the server approves each action itself; they still show in the chat and the audit log. The kill switch puts every agent back to "Ask".',
@@ -474,6 +507,10 @@ const en = {
   'notice.relay_on': 'Linked with {agent}: answers go back and forth, at most {hops} more messages.',
   'notice.relay_off': 'The link with {agent} ended.',
   'notice.relay_failed': 'Could not pass the answer to {agent}: {reason}.',
+  'notice.limit_wait': 'The usage limit ran out. The agent continues by itself at {at}.',
+  'notice.limit_continue': 'The limit has reset: continuing.',
+  'notice.limit_gave_up': 'The limit still has not reset after several tries; continue by hand when it does.',
+  'notice.limit_cancelled': 'Automatic continue cancelled.',
 
   'settings.language': 'Language',
   'settings.languageHint': 'Saved on this device.',

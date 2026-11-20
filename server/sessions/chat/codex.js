@@ -1,5 +1,5 @@
 // @ts-check
-import { noticeItem, parseCommand, rpcOnce, startJsonProcess, str } from './process.js';
+import { LIMIT_TEXT, noticeItem, parseCommand, rpcOnce, startJsonProcess, str } from './process.js';
 
 /** The app-server has no slash commands of its own; these map onto its requests. */
 export const CODEX_COMMANDS = [
@@ -108,6 +108,14 @@ export function startCodex(opts) {
   /** Picked with /model and /effort and sent with every following turn. */
   /** @type {{ model?: string, effort?: string }} */
   const overrides = {};
+  /** Session totals now and when the answer in progress began; the difference is the answer's. */
+  let total = { input: 0, output: 0, cached: 0 };
+  let turnStart = total;
+  /** The plan limit stopped the answer in progress. */
+  let limited = false;
+
+  /** @param {any} error */
+  const isLimit = (error) => LIMIT_TEXT.test(str(error ?? '', 4000));
 
   /** @param {string} method @param {unknown} params */
   function call(method, params) {
@@ -239,8 +247,26 @@ export function startCodex(opts) {
         const t = u?.total;
         if (typeof t?.inputTokens === 'number' && typeof t.outputTokens === 'number') {
           const cached = typeof t.cachedInputTokens === 'number' ? t.cachedInputTokens : 0;
+          total = { input: Math.max(0, t.inputTokens - cached), cached, output: t.outputTokens };
           hooks.meta({
-            tokens: { input: Math.max(0, t.inputTokens - cached), cached, output: t.outputTokens },
+            tokens: total,
+            turnTokens: {
+              input: Math.max(0, total.input - turnStart.input),
+              cached: Math.max(0, total.cached - turnStart.cached),
+              output: Math.max(0, total.output - turnStart.output),
+            },
+          });
+        }
+        return;
+      }
+      case 'account/rateLimits/updated': {
+        const w = p.rateLimits?.primary;
+        if (typeof w?.usedPercent === 'number') {
+          hooks.meta({
+            window: {
+              percent: w.usedPercent,
+              resetsAt: typeof w.resetsAt === 'number' ? w.resetsAt * 1000 : null,
+            },
           });
         }
         return;
@@ -249,12 +275,16 @@ export function startCodex(opts) {
         turnId = p.turn?.id ?? turnId;
         hooks.busy(true);
         return;
-      case 'turn/completed':
+      case 'turn/completed': {
         turnId = null;
+        const stop = limited || (p.turn?.status === 'failed' && isLimit(p.turn.error));
+        limited = false;
         hooks.busy(false);
         if (p.turn?.status === 'failed' && p.turn.error)
           notice('agent_error', { message: str(p.turn.error.message ?? p.turn.error, 2000) });
+        if (stop) hooks.limit(null);
         return;
+      }
       case 'item/started':
       case 'item/completed':
         onItem(p.item);
@@ -263,6 +293,7 @@ export function startCodex(opts) {
         if (p.itemId && typeof p.delta === 'string') hooks.delta(String(p.itemId), p.delta);
         return;
       case 'error':
+        if (!p.willRetry && isLimit(p.error)) limited = true;
         if (!p.willRetry) notice('agent_error', { message: str(p.error?.message ?? p.error, 2000) });
         return;
       case 'serverRequest/resolved':
@@ -386,6 +417,8 @@ export function startCodex(opts) {
    * @param {string} method @param {Record<string, unknown>} params
    */
   function turnRequest(method, params) {
+    turnStart = total;
+    limited = false;
     hooks.busy(true);
     void call(method, params).then((r) => {
       if (r.error) {

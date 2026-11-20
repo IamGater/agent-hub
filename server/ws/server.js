@@ -222,7 +222,8 @@ export function attachWs(ctx) {
       case 'chat-interrupt':
       case 'chat-unqueue':
       case 'chat-link':
-      case 'chat-unlink': {
+      case 'chat-unlink':
+      case 'chat-continue-cancel': {
         if (mode !== 'control') return send(ws, { type: 'error', code: 'view_mode' });
         const info = manager.has(msg.agentId) ? manager.info(msg.agentId) : null;
         if (!info || info.pid === null || info.type === 'terminal') {
@@ -251,6 +252,9 @@ export function attachWs(ctx) {
           ctx.audit('link', actor(conn), { agentId: msg.agentId, peer: msg.peer, hops: msg.hops });
         } else if (msg.type === 'chat-unqueue') {
           manager.unqueue(msg.agentId, msg.itemId);
+        } else if (msg.type === 'chat-continue-cancel') {
+          manager.cancelContinue(msg.agentId);
+          ctx.audit('continue_cancel', actor(conn), { agentId: msg.agentId });
         } else if (msg.type === 'chat-unlink') {
           manager.unlink(msg.agentId);
           ctx.audit('unlink', actor(conn), { agentId: msg.agentId });

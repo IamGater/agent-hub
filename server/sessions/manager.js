@@ -11,7 +11,8 @@ import { claudeUsage, startClaude } from './chat/claude.js';
 import { codexUsage, listCodexThreads, startCodex } from './chat/codex.js';
 import { listAcpSessions, startAcp } from './chat/acp.js';
 import { SESSION_ID, claudeConfigDir, claudeHistory, claudeSessions } from './chat/history.js';
-import { noticeItem } from './chat/process.js';
+import { CONTINUE_TEXT, noticeItem } from './chat/process.js';
+import { createRateBook, resumeUnits, unitsOf } from './rate.js';
 import { isImagePath } from '../agents/images.js';
 import { buildEnv } from '../agents/env.js';
 import { killTree } from '../agents/kill.js';
@@ -26,8 +27,13 @@ import { resolveWorkdir } from '../agents/workdir.js';
  *   link: { peer: string, left: number } | null, autoApprove: boolean,
  *   model: string | null, context: { used: number, size: number } | null, plan: string | null,
  *   tokens: import('./chat/process.js').Tokens | null, busySince: number | null,
- *   lastTurnMs: number | null,
+ *   lastTurnMs: number | null, turnTokens: import('./chat/process.js').Tokens | null,
+ *   turnPercent: number | null, continueAt: number | null,
  * }} AgentInfo
+ *
+ * `turnTokens`: spent by the answer in progress, or by the last one; `turnPercent` the same as an
+ * estimated share of the account's 5-hour limit (null until that rate is learned, see rate.js).
+ * `continueAt`: the plan limit stopped the agent, and it is told to continue at this time.
  *
  * `autoApprove`: the owner chose to let this agent act without asking. The agent itself still runs
  * in its asking mode; the server answers each request with "allow once", so every action still
@@ -69,12 +75,19 @@ const ROWS = 30;
  *   lastFolders?: Record<string, string>, onFolder?: (id: string, cwd: string) => void,
  *   savedModels?: Record<string, string>, onModel?: (id: string, model: string | null) => void,
  *   savedUsage?: Record<string, CachedUsage>, onUsage?: (id: string, usage: CachedUsage) => void,
+ *   savedRates?: Record<string, import('./rate.js').AccountRate>,
+ *   onRates?: (all: Record<string, import('./rate.js').AccountRate>) => void,
+ *   backgroundUsage?: boolean, continueMargin?: number,
  * }} opts
  * @typedef {{ at: number, account: import('./chat/process.js').AccountUsage }} CachedUsage
  * `lastFolders` are the folders agents were last started in (offered again if still allowed);
  * `onFolder` is told about each start so they can be stored.
  * `savedModels` are the models the owner picked with /model, used for every later start until
  * changed (`/model default` goes back to the agent's configured one); `onModel` stores a choice.
+ * `savedRates`/`onRates`: what was learned about how many tokens a percent of each account's limit
+ * is (rate.js). `backgroundUsage`: look at the account's limits now and then after an answer, so
+ * that rate is learned without the owner opening the usage panel. `continueMargin`: how long after
+ * the limit resets the agent is told to continue (also the shortest wait).
  * `stillAutoApproved` is asked again before each automatic answer: the kill switch run from the
  * command line clears the setting in the database while this process keeps its own copy.
  */
@@ -92,7 +105,16 @@ export function createManager({
   onModel = () => {},
   savedUsage = {},
   onUsage = () => {},
+  savedRates = {},
+  onRates = () => {},
+  backgroundUsage = false,
+  continueMargin = 90_000,
 }) {
+  const rates = createRateBook({ saved: savedRates, onSave: onRates });
+  /** How long past the reset time the agent is told to continue, and how often before giving up. */
+  const CONTINUE_FALLBACK = 30 * 60_000;
+  const CONTINUE_TRIES = 5;
+  const BACKGROUND_USAGE = 10 * 60_000;
   /** The last plan limits each agent reported, shown while a fresh look is on its way. */
   const lastUsage = { ...savedUsage };
   const models = { ...savedModels };
@@ -111,6 +133,8 @@ export function createManager({
    *   commands: import('./chat/process.js').Command[],
    *   images: Map<string, string>, link: Link | null,
    *   queue: { itemId: string, text: string, from?: string }[], modelAsk: string | null,
+   *   account: string, turnUnits: number, limitedTurn: boolean,
+   *   wait: NodeJS.Timeout | null, limitTries: number,
    * }} Session
    */
   /** @type {Map<string, Session>} */
@@ -125,6 +149,24 @@ export function createManager({
     } catch {
       return agent.cwd;
     }
+  }
+
+  /**
+   * Agents signed in to the same account share its limits; the config folder tells them apart.
+   * @param {import('../config/schema.js').Agent} agent
+   */
+  function accountOf(agent) {
+    const env = buildEnv(config.agentEnv, agent.env);
+    const dir = agent.type === 'codex' ? env.CODEX_HOME : env.CLAUDE_CONFIG_DIR;
+    return `${agent.type}:${(dir ?? '').toLowerCase()}`;
+  }
+
+  /**
+   * The 5-hour window of an account's limits, the one the rate is learned on.
+   * @param {import('./chat/process.js').AccountUsage | null} account
+   */
+  function shortWindow(account) {
+    return (account?.limits ?? []).find((l) => l.windowMins === 300 || l.kind === 'session') ?? null;
   }
 
   for (const agent of agents) {
@@ -143,6 +185,11 @@ export function createManager({
       link: null,
       queue: [],
       modelAsk: null,
+      account: accountOf(agent),
+      turnUnits: 0,
+      limitedTurn: false,
+      wait: null,
+      limitTries: 0,
       info: {
         id: agent.id,
         name: agent.name,
@@ -164,6 +211,9 @@ export function createManager({
         tokens: null,
         busySince: null,
         lastTurnMs: null,
+        turnTokens: null,
+        turnPercent: null,
+        continueAt: null,
       },
     });
   }
@@ -442,6 +492,76 @@ export function createManager({
     }
   }
 
+  /** @param {Session} s */
+  function clearWait(s) {
+    s.limitTries = 0;
+    if (!s.wait) return false;
+    clearTimeout(s.wait);
+    s.wait = null;
+    update(s, { continueAt: null });
+    return true;
+  }
+
+  /**
+   * The plan limit ended the answer: wait until it comes back, then tell the agent to go on.
+   * Without a reset time from the agent the account's limits are asked; failing that, it tries
+   * again in half an hour. After a few continues that run into the limit again it stops.
+   * @param {Session} s @param {number | null} resetsAt
+   */
+  async function limitHit(s, resetsAt) {
+    s.limitedTurn = true;
+    const chat = s.chat;
+    let at = resetsAt;
+    if (!at) {
+      try {
+        const account = await usageOf(s.agent.id, true);
+        const full = (account?.limits ?? []).filter((l) => l.percent >= 99 && l.resetsAt);
+        at = full.length ? Math.max(...full.map((l) => /** @type {number} */ (l.resetsAt))) : null;
+      } catch {
+        at = null;
+      }
+    }
+    if (!chat || s.chat !== chat) return;
+    if (s.wait) clearTimeout(s.wait);
+    s.wait = null;
+    if (s.limitTries >= CONTINUE_TRIES) {
+      s.limitTries = 0;
+      update(s, { continueAt: null });
+      chatItem(s, noticeItem('limit_gave_up', {}, 'error', now()));
+      if (s.queue.length && !s.info.busy) flush(s);
+      return;
+    }
+    const when = Math.max(at ? at + continueMargin : now() + CONTINUE_FALLBACK, now() + continueMargin);
+    // After the computer slept the timer is late, and fires as soon as it wakes.
+    s.wait = setTimeout(() => continueAfterLimit(s, chat), Math.min(when - now(), 2 ** 31 - 1));
+    update(s, { continueAt: when });
+    chatItem(s, noticeItem('limit_wait', { at: new Date(when).toISOString() }, 'info', now()));
+  }
+
+  /** @param {Session} s @param {import('./chat/process.js').Driver} chat the run that hit the limit */
+  function continueAfterLimit(s, chat) {
+    s.wait = null;
+    update(s, { continueAt: null });
+    // Stopped since, or the owner already took over: nothing to continue.
+    if (s.chat !== chat || s.info.busy) return;
+    s.limitTries++;
+    chatItem(s, noticeItem('limit_continue', {}, 'info', now()));
+    // The owner's waiting messages say better what to do next than a plain "continue".
+    if (s.queue.length) return flush(s);
+    const itemId = `user:${now()}:${Math.random().toString(36).slice(2, 8)}`;
+    const refused = deliver(s, itemId, CONTINUE_TEXT);
+    if (refused) chatItem(s, noticeItem('not_done', { message: refused }, 'error', now()));
+  }
+
+  /** @param {Session} s @param {import('./chat/process.js').Tokens} t */
+  function turnPatch(s, t) {
+    const units = unitsOf(t);
+    rates.spend(s.account, units - s.turnUnits);
+    s.turnUnits = units;
+    const pct = rates.percentOf(s.account, units);
+    return { turnTokens: t, turnPercent: pct === null ? null : Math.round(pct * 10) / 10 };
+  }
+
   /** @param {Session} s @param {string} cwd @param {string} [resume] */
   function startChat(s, cwd, resume) {
     const id = s.agent.id;
@@ -458,14 +578,29 @@ export function createManager({
         if (s.info.busy === busy) return;
         // How long the answer takes: a running clock while busy, the last duration after.
         const since = s.info.busySince;
+        if (busy) {
+          s.limitedTurn = false;
+          s.turnUnits = 0;
+        }
         update(s, {
           busy,
           busySince: busy ? now() : null,
+          ...(busy ? { turnTokens: { input: 0, output: 0, cached: 0 }, turnPercent: null } : {}),
           ...(!busy && since ? { lastTurnMs: now() - since } : {}),
         });
         if (!busy && s.link) relay(s);
-        // After the driver has finished handling the end of the answer.
-        if (!busy && s.queue.length) queueMicrotask(() => flush(s));
+        // After the driver has finished handling the end of the answer: by then it has said
+        // whether the limit stopped it. An answer that ended normally starts the count of tries over.
+        if (!busy) {
+          queueMicrotask(() => {
+            if (!s.limitedTurn) {
+              s.limitTries = 0;
+              refreshInBackground(s);
+            }
+            // Messages waiting behind an answer the limit stopped go in when it is back.
+            if (s.queue.length && !s.limitedTurn) flush(s);
+          });
+        }
       },
       waiting(prompt) {
         const was = s.info.status;
@@ -478,7 +613,13 @@ export function createManager({
         }
       },
       meta(patch) {
-        update(s, patch);
+        const { window, turnTokens, ...rest } = patch;
+        if (window) rates.reading(s.account, window.percent, window.resetsAt);
+        if (turnTokens) update(s, { ...rest, ...turnPatch(s, turnTokens) });
+        else if (Object.keys(rest).length) update(s, rest);
+      },
+      limit(resetsAt) {
+        void limitHit(s, resetsAt);
       },
       commands(list) {
         s.commands = [...list.filter((c) => c.name !== 'resume'), RESUME_COMMAND];
@@ -503,7 +644,12 @@ export function createManager({
     };
     const chat = DRIVERS[/** @type {keyof typeof DRIVERS} */ (s.agent.type)](opts);
     s.chat = chat;
+    s.turnUnits = 0;
+    s.limitedTurn = false;
     update(s, {
+      turnTokens: null,
+      turnPercent: null,
+      continueAt: null,
       status: 'running',
       model: models[id] ?? s.agent.model ?? null,
       context: null,
@@ -520,6 +666,9 @@ export function createManager({
     s.exited = chat.exited.then((exitCode) => {
       s.chat = null;
       s.modelAsk = null;
+      if (s.wait) clearTimeout(s.wait);
+      s.wait = null;
+      s.limitTries = 0;
       unlink(s);
       dropQueued(s);
       chatItem(
@@ -528,7 +677,15 @@ export function createManager({
           ? noticeItem('not_started', {}, 'error', now())
           : noticeItem('exited', { code: String(exitCode) }, exitCode === 0 ? 'info' : 'error', now()),
       );
-      update(s, { status: 'exited', pid: null, exitCode, prompt: null, busy: false, busySince: null });
+      update(s, {
+        status: 'exited',
+        pid: null,
+        exitCode,
+        prompt: null,
+        busy: false,
+        busySince: null,
+        continueAt: null,
+      });
       events.emit('exit', { id, exitCode });
     });
     events.emit('spawn', { id, pid: chat.pid, startedAt: s.info.startedAt });
@@ -574,6 +731,8 @@ export function createManager({
     value.then(
       (account) => {
         if (!account) return;
+        const w = shortWindow(account);
+        if (w) rates.reading(s.account, w.percent, w.resetsAt);
         lastUsage[id] = { at: now(), account };
         onUsage(id, lastUsage[id]);
       },
@@ -581,6 +740,17 @@ export function createManager({
     );
     usageCache.set(id, { at: now(), value });
     return value;
+  }
+
+  /**
+   * Looks at the account's limits after an answer when the last look is old, so the rate of tokens
+   * per percent is learned while the agents work. Off unless asked for (tests start nothing extra).
+   * @param {Session} s
+   */
+  function refreshInBackground(s) {
+    if (!backgroundUsage || (s.agent.type !== 'claude' && s.agent.type !== 'codex')) return;
+    if (now() - (lastUsage[s.agent.id]?.at ?? 0) < BACKGROUND_USAGE) return;
+    usageOf(s.agent.id).catch(() => {});
   }
 
   /**
@@ -593,7 +763,16 @@ export function createManager({
     const cwd = resolveWorkdir(dir, config.allowedRoots);
     const env = buildEnv(config.agentEnv, s.agent.env);
     const opts = { command: s.agent.command, args: [], cwd, env, spawn: spawnChild };
-    if (s.agent.type === 'claude') return claudeSessions(claudeConfigDir(env), cwd);
+    if (s.agent.type === 'claude') {
+      // What resuming costs: the whole conversation goes out again with the next message, written
+      // to the prompt cache anew unless it was used minutes ago and the cache is still warm.
+      return claudeSessions(claudeConfigDir(env), cwd).map((x) => {
+        if (!x.tokens) return x;
+        const warm = now() - x.updatedAt < 5 * 60_000;
+        const pct = rates.percentOf(s.account, resumeUnits(x.tokens, warm));
+        return { ...x, warm, percent: pct === null ? null : Math.round(pct * 10) / 10 };
+      });
+    }
     if (s.agent.type === 'codex') return listCodexThreads(opts);
     if (s.agent.type === 'antigravity') return listAcpSessions(opts);
     return [];
@@ -720,11 +899,19 @@ export function createManager({
     },
     /** Removes one waiting message. @param {string} id @param {string} itemId */
     unqueue: (id, itemId) => dropQueued(get(id), itemId),
+    /** The owner does not want the agent to continue by itself after the limit. @param {string} id */
+    cancelContinue(id) {
+      const s = get(id);
+      if (clearWait(s)) chatItem(s, noticeItem('limit_cancelled', {}, 'info', now()));
+      // Messages held for the continue go in now: the owner takes over.
+      if (s.queue.length && !s.info.busy) flush(s);
+    },
     /** @param {string} id */
     interrupt(id) {
       const s = get(id);
       // Stopping one side of a conversation stops the conversation.
       unlink(s);
+      if (clearWait(s)) chatItem(s, noticeItem('limit_cancelled', {}, 'info', now()));
       s.chat?.interrupt();
     },
   };

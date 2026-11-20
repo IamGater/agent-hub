@@ -5,6 +5,7 @@ import { t } from '../i18n.js';
 import { useAutosize } from '../hooks/useAutosize.js';
 import { useControl } from '../hooks/useCountdown.js';
 import { useSessions, when } from '../hooks/useSessions.js';
+import { costLabel, resumeWarning } from '../resumeCost.js';
 import Chat from '../components/Chat.jsx';
 import ConfirmButton from '../components/ConfirmButton.jsx';
 import { BlockedInput, ModeControl } from '../components/Controls.jsx';
@@ -57,6 +58,8 @@ const HOPS = [2, 4, 6, 10, 20];
 /** Past conversations in the chosen folder; picking one starts the agent on it. */
 function ResumeControl({ agent, cwd, disabled, onResume }) {
   const [open, setOpen] = useState(false);
+  // A long session asks first: resuming it sends the whole conversation again.
+  const [confirm, setConfirm] = useState(null);
   const anchor = useRef(null);
   const pop = useRef(null);
   const sessions = useSessions(agent.id, cwd, open);
@@ -78,7 +81,10 @@ function ResumeControl({ agent, cwd, disabled, onResume }) {
         disabled={disabled}
         aria-expanded={open}
         title={t('resume.button')}
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          setOpen(!open);
+          setConfirm(null);
+        }}
       >
         <History size={15} />
         <span className="btn-label">{t('resume.button')}</span>
@@ -86,21 +92,49 @@ function ResumeControl({ agent, cwd, disabled, onResume }) {
       {open && (
         <div className="popover stack-sm" role="dialog" aria-label={t('resume.title')} ref={pop}>
           <strong>{t('resume.title')}</strong>
-          {sessions.loading && <p className="muted small">{t('chat.sessionsLoading')}</p>}
-          {sessions.error && <p className="error small">{messageOf(sessions.error)}</p>}
-          {sessions.list && !sessions.list.length && <p className="muted small">{t('chat.noSessions')}</p>}
-          {sessions.list?.length > 0 && (
+          {confirm && (
+            <div className="resume-confirm stack-sm" role="alert">
+              <span className="session-title">{confirm.session.title}</span>
+              <p className="small">{confirm.warning}</p>
+              <div className="resume-confirm-actions">
+                <button className="btn" onClick={() => setConfirm(null)}>
+                  {t('resume.cancel')}
+                </button>
+                <button
+                  className="btn primary"
+                  autoFocus
+                  onClick={() => {
+                    setOpen(false);
+                    setConfirm(null);
+                    onResume(confirm.session.id);
+                  }}
+                >
+                  {t('resume.confirm')}
+                </button>
+              </div>
+            </div>
+          )}
+          {!confirm && sessions.loading && <p className="muted small">{t('chat.sessionsLoading')}</p>}
+          {!confirm && sessions.error && <p className="error small">{messageOf(sessions.error)}</p>}
+          {!confirm && sessions.list && !sessions.list.length && (
+            <p className="muted small">{t('chat.noSessions')}</p>
+          )}
+          {!confirm && sessions.list?.length > 0 && (
             <ul className="session-list">
               {sessions.list.map((s) => (
                 <li key={s.id}>
                   <button
                     onClick={() => {
+                      const warning = resumeWarning(s);
+                      if (warning) return setConfirm({ session: s, warning });
                       setOpen(false);
                       onResume(s.id);
                     }}
                   >
                     <span className="session-title">{s.title}</span>
-                    <span className="muted small">{when(s.updatedAt)}</span>
+                    <span className="muted small">
+                      {[when(s.updatedAt), costLabel(s)].filter(Boolean).join(' · ')}
+                    </span>
                   </button>
                 </li>
               ))}
