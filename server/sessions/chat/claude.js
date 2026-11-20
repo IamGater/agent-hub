@@ -105,6 +105,21 @@ function resultText(content) {
 }
 
 /**
+ * What a failed result says, without Claude Code's internal "[ede_diagnostic] …" lines, which only
+ * describe where its loop ended. Empty when nothing readable is left.
+ * @param {any} msg
+ */
+export function errorText(msg) {
+  if (typeof msg.result === 'string' && msg.result.trim()) return str(msg.result, 2000);
+  const errors = (Array.isArray(msg.errors) ? msg.errors : [msg.errors])
+    .map((e) => (typeof e === 'string' ? e : e ? str(e, 500) : ''))
+    .filter((e) => e.trim() && !e.startsWith('[ede_diagnostic]'));
+  if (errors.length) return str(errors.join('\n'), 2000);
+  if (msg.subtype === 'error_max_turns') return 'too many steps in one answer';
+  return '';
+}
+
+/**
  * Claude Code in print mode with streaming JSON both ways. Every permission prompt is sent to us as
  * a can_use_tool control request (--permission-prompt-tool stdio) and waits for the owner. The
  * permission mode is pinned to "default" so a bypass set in the user's settings cannot take over.
@@ -134,6 +149,8 @@ export function startClaude(opts) {
   /** Set during an answer when the plan limit stopped it: when the limit comes back (ms), or null. */
   /** @type {{ resetsAt: number | null } | null} */
   let limited = null;
+  /** Set when the owner stopped the answer: its error result is just the stop, not a failure. */
+  let interrupted = false;
 
   const n = (/** @type {unknown} */ v) => (typeof v === 'number' && v > 0 ? v : 0);
 
@@ -245,16 +262,17 @@ export function startClaude(opts) {
           request_id: `ctx:${randomUUID()}`,
           request: { subtype: 'get_context_usage' },
         });
+        const stopped = interrupted;
+        interrupted = false;
         if (msg.is_error || (msg.subtype && msg.subtype !== 'success')) {
-          hooks.item({
-            id: `result:${randomUUID()}`,
-            kind: 'notice',
-            level: 'error',
-            ts: now(),
-            text: `Agent error: ${str(msg.result ?? msg.errors ?? msg.subtype, 2000)}`,
-            code: 'agent_error',
-            vars: { message: str(msg.result ?? msg.errors ?? msg.subtype, 2000) },
-          });
+          const message = errorText(msg);
+          if (stopped && !stop) {
+            hooks.item(noticeItem('interrupted', {}, 'info', now()));
+          } else if (message) {
+            hooks.item(noticeItem('agent_error', { message }, 'error', now()));
+          } else {
+            hooks.item(noticeItem('agent_failed', {}, 'error', now()));
+          }
         }
         if (stop) hooks.limit(stop.resetsAt);
         return;
@@ -473,6 +491,7 @@ export function startClaude(opts) {
       return true;
     },
     interrupt() {
+      interrupted = true;
       proc.write({ type: 'control_request', request_id: randomUUID(), request: { subtype: 'interrupt' } });
     },
   };

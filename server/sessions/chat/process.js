@@ -188,6 +188,8 @@ export async function rpcOnce(opts, fn, timeoutMs = 20_000) {
 export const NOTICES = {
   ready: 'Agent ready.',
   agent_error: 'Agent error: {message}',
+  agent_failed: 'The answer ended with an error before it was finished. Send the message again.',
+  interrupted: 'Stopped.',
   start_failed: 'The agent did not start: {message}',
   session_failed: 'The agent did not open a session: {message}',
   mode_refused: 'The agent did not switch to asking before every action, so the session is not used.',

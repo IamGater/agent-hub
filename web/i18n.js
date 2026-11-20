@@ -204,6 +204,8 @@ const ru = {
 
   'notice.ready': 'Агент готов.',
   'notice.agent_error': 'Ошибка агента: {message}',
+  'notice.agent_failed': 'Ответ оборвался с ошибкой, не дойдя до конца. Отправьте сообщение ещё раз.',
+  'notice.interrupted': 'Остановлено.',
   'notice.start_failed': 'Агент не запустился: {message}',
   'notice.session_failed': 'Агент не открыл сессию: {message}',
   'notice.mode_refused':
@@ -498,6 +500,8 @@ const en = {
 
   'notice.ready': 'Agent ready.',
   'notice.agent_error': 'Agent error: {message}',
+  'notice.agent_failed': 'The answer ended with an error before it was finished. Send the message again.',
+  'notice.interrupted': 'Stopped.',
   'notice.start_failed': 'The agent did not start: {message}',
   'notice.session_failed': 'The agent did not open a session: {message}',
   'notice.mode_refused':
