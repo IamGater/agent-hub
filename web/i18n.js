@@ -185,6 +185,7 @@ const ru = {
   'tool.ok': 'готово',
   'tool.error': 'ошибка',
   'tool.declined': 'отклонено',
+  'tool.count': 'Команд: {n}',
   'approval.allowed': 'Разрешено',
   'approval.denied': 'Запрещено',
   'approval.cancelled': 'Отменено агентом',
@@ -235,6 +236,11 @@ const ru = {
 
   'settings.language': 'Язык',
   'settings.languageHint': 'Сохраняется на этом устройстве.',
+  'settings.tools': 'Команды в чате',
+  'settings.tools.separate': 'Отдельно',
+  'settings.tools.grouped': 'Одним блоком',
+  'settings.toolsHint':
+    'Одним блоком: команды подряд сворачиваются в одну строку, стрелка раскрывает список. Сохраняется на этом устройстве.',
   'settings.phone': 'Телефон',
   'settings.connect': 'Подключить телефон',
   'settings.step1': 'Включите удалённый доступ переключателем в боковой панели.',
@@ -524,6 +530,11 @@ const en = {
 
   'settings.language': 'Language',
   'settings.languageHint': 'Saved on this device.',
+  'settings.tools': 'Commands in the chat',
+  'settings.tools.separate': 'Separate',
+  'settings.tools.grouped': 'One block',
+  'settings.toolsHint':
+    'One block: commands in a row fold into one line, the arrow opens the list. Saved on this device.',
   'settings.phone': 'Phone',
   'settings.connect': 'Connect a phone',
   'settings.step1': 'Turn on remote access with the switch in the sidebar.',

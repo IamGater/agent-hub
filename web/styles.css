@@ -1343,6 +1343,46 @@ textarea:focus {
   color: var(--muted);
 }
 
+.tool-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tool-group-count {
+  flex: none;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.tool-group-chevron {
+  flex: none;
+  display: flex;
+  color: var(--muted);
+  transition: transform 0.18s;
+}
+
+.tool-group.open .tool-group-chevron {
+  transform: rotate(180deg);
+}
+
+.tool-group-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-top: 1px solid var(--line);
+  animation: fade 0.18s ease-out;
+}
+
 .approval {
   border: 1px solid var(--line);
   border-radius: 12px;

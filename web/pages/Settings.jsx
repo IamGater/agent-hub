@@ -4,6 +4,7 @@ import { LANGUAGES, setLang, t, useLang } from '../i18n.js';
 import ConfirmButton from '../components/ConfirmButton.jsx';
 import { Phone, Power, Restart } from '../components/Icons.jsx';
 import { useControl } from '../hooks/useCountdown.js';
+import { setToolView, TOOL_VIEWS, useToolView } from '../prefs.js';
 
 function date(ms) {
   return ms ? new Date(ms).toLocaleString() : t('settings.never');
@@ -28,6 +29,29 @@ function Language() {
         ))}
       </div>
       <p className="muted small">{t('settings.languageHint')}</p>
+    </section>
+  );
+}
+
+function ToolView() {
+  const view = useToolView();
+  return (
+    <section className="card stack-sm">
+      <h3>{t('settings.tools')}</h3>
+      <div className="segmented" role="radiogroup" aria-label={t('settings.tools')}>
+        {TOOL_VIEWS.map((v) => (
+          <button
+            key={v}
+            role="radio"
+            aria-checked={view === v}
+            className={view === v ? 'on' : ''}
+            onClick={() => setToolView(v)}
+          >
+            {t(`settings.tools.${v}`)}
+          </button>
+        ))}
+      </div>
+      <p className="muted small">{t('settings.toolsHint')}</p>
     </section>
   );
 }
@@ -496,6 +520,7 @@ export default function Settings({ state, onChange, agents, conn }) {
     <main className="page stack">
       <h1 className="hero small-hero">{t('settings')}</h1>
       <Language />
+      <ToolView />
       <Permissions agents={agents} control={control} />
       <OnClose state={state} />
       <PhoneSettings state={state} onChange={onChange} />

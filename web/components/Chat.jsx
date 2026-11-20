@@ -3,8 +3,9 @@ import { ApiError, messageOf } from '../api.js';
 import { has, locale, t } from '../i18n.js';
 import Composer, { clock, useClock } from './Composer.jsx';
 import Dropdown from './Dropdown.jsx';
-import { Close, Copy, Forward } from './Icons.jsx';
+import { Chevron, Close, Copy, Forward } from './Icons.jsx';
 import Markdown from './Markdown.jsx';
+import { useToolView } from '../prefs.js';
 
 // The server keeps a bounded transcript; without the same bound here a long session would grow
 // the window's memory forever. Oldest items go first, like on the server.
@@ -118,7 +119,7 @@ function Images({ agentId, item, onOpen }) {
   );
 }
 
-function Tool({ agentId, item, onOpen }) {
+function Tool({ agentId, item, onOpen, images = true }) {
   // Outputs run to 20k characters each; keep them out of the page until the owner opens one.
   const [open, setOpen] = useState(false);
   return (
@@ -132,9 +133,75 @@ function Tool({ agentId, item, onOpen }) {
         {open && item.detail && <pre className="tool-pre">{item.detail}</pre>}
         {open && item.output && <pre className="tool-pre out">{item.output}</pre>}
       </details>
-      <Images agentId={agentId} item={item} onOpen={onOpen} />
+      {images && <Images agentId={agentId} item={item} onOpen={onOpen} />}
     </div>
   );
+}
+
+/** The state a group of commands shows: running while one runs, then an error if one failed. */
+function groupStatus(tools) {
+  if (tools.some((x) => x.status === 'running')) return 'running';
+  if (tools.some((x) => x.status === 'error' || x.status === 'declined')) return 'error';
+  return 'ok';
+}
+
+/** Commands run one after another, folded into one row that opens into the list. */
+const ToolGroup = memo(
+  function ToolGroup({ agentId, tools, onOpen }) {
+    const [open, setOpen] = useState(false);
+    const status = groupStatus(tools);
+    const last = tools[tools.length - 1];
+    return (
+      <div className="tool-wrap">
+        <div className={`tool tool-group ${open ? 'open' : ''}`}>
+          <button className="tool-group-head" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+            <span className={`tool-dot ${status}`} />
+            <span className="tool-group-count">{t('tool.count', { n: tools.length })}</span>
+            <span className="tool-title">{last.title}</span>
+            <span className="tool-group-chevron">
+              <Chevron size={16} />
+            </span>
+          </button>
+          {open && (
+            <div className="tool-group-list">
+              {tools.map((x) => (
+                <Tool key={x.id} agentId={agentId} item={x} onOpen={onOpen} images={false} />
+              ))}
+            </div>
+          )}
+        </div>
+        {tools.map((x) => (
+          <Images key={x.id} agentId={agentId} item={x} onOpen={onOpen} />
+        ))}
+      </div>
+    );
+  },
+  (a, b) =>
+    a.agentId === b.agentId &&
+    a.onOpen === b.onOpen &&
+    a.tools.length === b.tools.length &&
+    a.tools.every((x, i) => x === b.tools[i]),
+);
+
+/** Folds each run of commands (with empty answers between them) into one entry. */
+function grouped(items) {
+  const out = [];
+  let run = null;
+  for (const item of items) {
+    if (item.kind === 'tool') {
+      if (!run) {
+        run = { kind: 'tools', id: `tools:${item.id}`, tools: [] };
+        out.push(run);
+      }
+      run.tools.push(item);
+    } else if (item.kind === 'assistant' && !item.text) {
+      // Renders nothing; it does not split the commands around it.
+    } else {
+      run = null;
+      out.push(item);
+    }
+  }
+  return out;
 }
 
 function MessageActions({ text, agent, agents, control, conn }) {
@@ -260,6 +327,8 @@ function Thinking({ since }) {
 
 export default function Chat({ agent, agents, conn, control, wide, blocked }) {
   const { items, commands } = useChat(agent.id, conn.listen);
+  const toolView = useToolView();
+  const shown = toolView === 'grouped' ? grouped(items) : items;
   const scroller = useRef(null);
   const stick = useRef(true);
   const [dismissed, setDismissed] = useState(0);
@@ -331,19 +400,23 @@ export default function Chat({ agent, agents, conn, control, wide, blocked }) {
               <p className="muted">{agent.pid === null ? t('chat.emptyStopped') : t('chat.emptyRunning')}</p>
             </div>
           )}
-          {items.map((item) => (
-            <Item
-              key={item.id}
-              item={item}
-              agent={agent}
-              agents={agents}
-              control={control}
-              conn={conn}
-              onOpen={setImage}
-              onAnswer={onAnswer}
-              onUnqueue={onUnqueue}
-            />
-          ))}
+          {shown.map((item) =>
+            item.kind === 'tools' ? (
+              <ToolGroup key={item.id} agentId={agent.id} tools={item.tools} onOpen={setImage} />
+            ) : (
+              <Item
+                key={item.id}
+                item={item}
+                agent={agent}
+                agents={agents}
+                control={control}
+                conn={conn}
+                onOpen={setImage}
+                onAnswer={onAnswer}
+                onUnqueue={onUnqueue}
+              />
+            ),
+          )}
           {agent.busy && agent.status !== 'waiting' && <Thinking since={agent.busySince} />}
         </div>
       </div>
