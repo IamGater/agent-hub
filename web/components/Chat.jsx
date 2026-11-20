@@ -101,20 +101,33 @@ function Approval({ item, control, onAnswer }) {
   );
 }
 
+function Thumb({ src, name, onOpen }) {
+  // Gone since, or never readable: no broken picture in the chat.
+  const [failed, setFailed] = useState(false);
+  if (failed) return null;
+  return (
+    <button className="thumb" onClick={() => onOpen({ src, name })}>
+      <img src={src} alt={t('chat.image', { name })} loading="lazy" onError={() => setFailed(true)} />
+      <span className="thumb-name">{name}</span>
+    </button>
+  );
+}
+
 function Images({ agentId, item, onOpen }) {
-  // A file being written is not there yet; show it once the tool is done.
-  if (!item.images?.length || item.status === 'running') return null;
+  // A file being written is not there yet, and a failed call (a wrong path) has none: show it
+  // once the tool has done its work.
+  if (!item.images?.length) return null;
+  if (item.kind === 'tool' && item.status !== 'ok') return null;
   return (
     <div className="images">
-      {item.images.map((img) => {
-        const src = `/api/agents/${encodeURIComponent(agentId)}/images/${img.id}?v=${item.ts}`;
-        return (
-          <button key={img.id} className="thumb" onClick={() => onOpen({ src, name: img.name })}>
-            <img src={src} alt={t('chat.image', { name: img.name })} loading="lazy" />
-            <span className="thumb-name">{img.name}</span>
-          </button>
-        );
-      })}
+      {item.images.map((img) => (
+        <Thumb
+          key={img.id}
+          src={`/api/agents/${encodeURIComponent(agentId)}/images/${img.id}?v=${item.ts}`}
+          name={img.name}
+          onOpen={onOpen}
+        />
+      ))}
     </div>
   );
 }
