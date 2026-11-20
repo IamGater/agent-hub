@@ -261,7 +261,6 @@ export default function Composer({
       agent.model)
     : null;
   const fill = agent.context?.size ? Math.round((agent.context.used / agent.context.size) * 100) : null;
-  const tokens = agent.tokens;
   const limited = agent.type === 'claude' || agent.type === 'codex';
 
   let placeholder = t('chat.placeholder');
@@ -414,20 +413,6 @@ export default function Composer({
         {fill !== null && (
           <span title={t('usage.contextHint', { used: agent.context.used, size: agent.context.size })}>
             {t('usage.context', { percent: fill })}
-          </span>
-        )}
-        {tokens && (
-          <span
-            title={t('tokens.hint', {
-              input: tokens.input.toLocaleString(),
-              cached: tokens.cached.toLocaleString(),
-              output: tokens.output.toLocaleString(),
-            })}
-          >
-            {t('tokens.short', {
-              input: compact(tokens.input + tokens.cached),
-              output: compact(tokens.output),
-            })}
           </span>
         )}
         {agent.busy && agent.busySince ? (
