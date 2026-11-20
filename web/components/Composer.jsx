@@ -7,6 +7,7 @@ import { useSessions, when } from '../hooks/useSessions.js';
 import { ArrowUp, Close, Gauge, ImageIcon, Stop } from './Icons.jsx';
 import { usePictures } from '../hooks/usePictures.js';
 import { AgentUsage, useNow } from '../pages/Usage.jsx';
+import { useDraft } from '../hooks/useDraft.js';
 
 /** 950 -> "950", 12_345 -> "12.3k", 2_400_000 -> "2.4M". */
 export function compact(n) {
@@ -118,7 +119,7 @@ export default function Composer({
   onCancelContinue,
   blocked,
 }) {
-  const [text, setText] = useState('');
+  const [text, setText] = useDraft(agent.id);
   // "/resume <long session>" asks first: the next message sends the whole conversation again.
   const [confirm, setConfirm] = useState(null);
   const pics = usePictures(agent.id);
