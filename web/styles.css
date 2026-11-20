@@ -1495,11 +1495,16 @@ textarea:focus {
 
 .chat-composer {
   grid-template-columns: auto 1fr auto;
+  grid-template-areas: 'attach text send';
+  align-items: end;
+  padding-left: 8px;
+}
+
+/* The row for pictures only when there are some: an empty row still took the gap above the text. */
+.chat-composer:has(.pics) {
   grid-template-areas:
     'pics pics pics'
     'attach text send';
-  align-items: end;
-  padding-left: 8px;
 }
 
 .chat-composer.dragging {
