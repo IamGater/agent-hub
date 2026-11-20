@@ -15,7 +15,18 @@ export const clientMessage = z.discriminatedUnion('type', [
   }),
   z.strictObject({ type: z.literal('mode') }),
   // The socket payload limit is 16 KiB; 6000 characters fit even when every one takes two bytes.
-  z.strictObject({ type: z.literal('chat-send'), agentId, text: z.string().trim().min(1).max(6000) }),
+  // Pictures go up over HTTP first (uploads); the message names them by id.
+  z
+    .strictObject({
+      type: z.literal('chat-send'),
+      agentId,
+      text: z.string().trim().max(6000),
+      images: z
+        .array(z.string().regex(/^[0-9a-f]{24}$/))
+        .max(8)
+        .optional(),
+    })
+    .refine((m) => m.text.length > 0 || (m.images?.length ?? 0) > 0),
   z.strictObject({
     type: z.literal('chat-answer'),
     agentId,

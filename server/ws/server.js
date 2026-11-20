@@ -230,10 +230,17 @@ export function attachWs(ctx) {
           return send(ws, { type: 'error', code: 'not_running' });
         }
         if (msg.type === 'chat-send') {
-          const refused = manager.say(msg.agentId, msg.text);
+          const images = (msg.images ?? []).map((id) => ctx.uploads.get(id));
+          if (images.some((i) => !i)) return send(ws, { type: 'error', code: 'image_gone' });
+          const refused = manager.say(
+            msg.agentId,
+            msg.text,
+            /** @type {import('../agents/uploads.js').Upload[]} */ (images),
+          );
           if (refused) return send(ws, { type: 'error', code: refused });
           /** @type {Record<string, unknown>} */
           const detail = { agentId: msg.agentId, length: msg.text.length };
+          if (images.length) detail.images = images.length;
           if (config.logInputText) detail.text = msg.text;
           ctx.audit('input', actor(conn), detail);
         } else if (msg.type === 'chat-answer') {

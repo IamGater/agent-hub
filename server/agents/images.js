@@ -22,6 +22,17 @@ const TYPES = /** @type {Record<string, { mime: string, magic: (b: Buffer) => bo
 
 export const IMAGE_MAX_BYTES = 15 * 1024 * 1024;
 
+/**
+ * What kind of image the bytes are, by their magic bytes alone.
+ * @param {Buffer} data @returns {{ ext: string, mime: string } | null}
+ */
+export function detectImage(data) {
+  for (const [ext, type] of Object.entries(TYPES)) {
+    if (ext !== '.jpeg' && type.magic(data)) return { ext, mime: type.mime };
+  }
+  return null;
+}
+
 /** @param {string} file */
 export function isImagePath(file) {
   return Object.hasOwn(TYPES, path.extname(file).toLowerCase());

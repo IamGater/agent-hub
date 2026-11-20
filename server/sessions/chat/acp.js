@@ -1,4 +1,5 @@
 // @ts-check
+import fs from 'node:fs';
 import path from 'node:path';
 import { noticeItem, parseCommand, rpcOnce, startJsonProcess, str } from './process.js';
 
@@ -241,6 +242,8 @@ export function startAcp(opts) {
   }
 
   const proc = startJsonProcess({ ...opts, args: ['acp'] }, onMessage);
+  /** The agent said it accepts pictures in a prompt. */
+  let takesImages = false;
 
   void (async () => {
     const init = await call('initialize', {
@@ -249,6 +252,7 @@ export function startAcp(opts) {
       clientInfo: { name: 'agent-hub', title: 'Agent Hub', version: '0.1.0' },
     });
     if (init.error) return notice('start_failed', { message: str(init.error.message, 500) });
+    takesImages = init.result?.agentCapabilities?.promptCapabilities?.image === true;
     // Loading a past session makes the agent replay it as session/update notifications.
     loading = Boolean(opts.resume);
     const created = opts.resume
@@ -297,9 +301,21 @@ export function startAcp(opts) {
       hooks.waiting(null);
       return code;
     }),
-    send(text) {
+    send(text, images = []) {
       if (!sessionId) return 'not_ready';
-      const cmd = parseCommand(text);
+      if (images.length && !takesImages) return 'images_unsupported';
+      /** @type {any[]} */
+      let pictures;
+      try {
+        pictures = images.map((img) => ({
+          type: 'image',
+          mimeType: img.mime,
+          data: fs.readFileSync(img.file).toString('base64'),
+        }));
+      } catch {
+        return 'image_gone';
+      }
+      const cmd = images.length ? null : parseCommand(text);
       if (cmd?.name === 'model') {
         if (!MODEL.test(cmd.args)) return 'bad_command';
         const sid = sessionId;
@@ -313,7 +329,8 @@ export function startAcp(opts) {
       message = null;
       hooks.busy(true);
       // Slash commands are part of the prompt text in ACP; the agent expands them itself.
-      void call('session/prompt', { sessionId, prompt: [{ type: 'text', text }] }).then((r) => {
+      const prompt = [...pictures, ...(text ? [{ type: 'text', text }] : [])];
+      void call('session/prompt', { sessionId, prompt }).then((r) => {
         message = null;
         hooks.busy(false);
         if (r.error) notice('not_done', { message: str(r.error.message, 500) });

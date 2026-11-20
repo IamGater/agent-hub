@@ -1,5 +1,6 @@
 // @ts-check
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
 import { killTree } from '../../agents/kill.js';
 import { LIMIT_TEXT, noticeItem, parseCommand, startJsonProcess, str } from './process.js';
 
@@ -404,8 +405,8 @@ export function startClaude(opts) {
       hooks.waiting(null);
       return code;
     }),
-    send(text) {
-      const cmd = parseCommand(text);
+    send(text, images = []) {
+      const cmd = images.length ? null : parseCommand(text);
       if (cmd && BLOCKED_COMMANDS.has(cmd.name)) return 'command_blocked';
       // Switched through the protocol rather than as text: the answer names the model at once, so
       // the chat shows it without waiting for the next message. "default" goes back to the default.
@@ -425,11 +426,30 @@ export function startClaude(opts) {
         return proc.write({ type: 'control_request', request_id: id, request }) ? null : 'not_running';
       }
       // Slash commands go in as ordinary text: Claude Code recognizes them itself.
+      /** @type {any} */
+      let content = text;
+      if (images.length) {
+        try {
+          content = [
+            ...images.map((img) => ({
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: img.mime,
+                data: fs.readFileSync(img.file).toString('base64'),
+              },
+            })),
+            ...(text ? [{ type: 'text', text }] : []),
+          ];
+        } catch {
+          return 'image_gone';
+        }
+      }
       const ok = proc.write({
         type: 'user',
         session_id: '',
         parent_tool_use_id: null,
-        message: { role: 'user', content: text },
+        message: { role: 'user', content },
       });
       if (!ok) return 'not_running';
       turnCalls = new Map();

@@ -197,6 +197,7 @@ const Item = memo(function Item({ item, agent, agents, control, conn, onAnswer, 
           className={`msg user ${item.from ? 'relayed' : ''} ${item.status === 'pending' ? 'queued' : ''} ${item.status === 'cancelled' ? 'dropped' : ''}`}
         >
           {item.from && <span className="msg-from">{t('chat.from', { agent: item.from })}</span>}
+          <Images agentId={agent.id} item={item} onOpen={onOpen} />
           {item.text}
           {item.status === 'pending' && (
             <span className="msg-queue">
@@ -354,11 +355,12 @@ export default function Chat({ agent, agents, conn, control, wide, blocked }) {
           control={control}
           wide={wide}
           commands={commands}
-          onSend={(text) => {
+          onSend={(text, images) => {
             stick.current = true;
-            send({ type: 'chat-send', text });
+            send({ type: 'chat-send', text, ...(images?.length ? { images } : {}) });
           }}
           onStop={() => send({ type: 'chat-interrupt' })}
+          onCancelContinue={() => send({ type: 'chat-continue-cancel' })}
         />
       </div>
       {image && <Lightbox image={image} onClose={() => setImage(null)} />}

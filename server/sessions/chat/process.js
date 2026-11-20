@@ -44,10 +44,12 @@ import { killTree } from '../../agents/kill.js';
  * @typedef {{
  *   pid: number,
  *   exited: Promise<number | null>,
- *   send: (text: string) => string | null,
+ *   send: (text: string, images?: Picture[]) => string | null,
  *   answer: (requestId: string, allow: boolean) => boolean,
  *   interrupt: () => void,
  * }} Driver
+ * `images`: pictures the owner pasted, sent along with the text.
+ * @typedef {{ file: string, mime: string }} Picture
  *
  * @typedef {{
  *   command: string, args: string[], cwd: string, env: Record<string, string>,

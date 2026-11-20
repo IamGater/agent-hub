@@ -4,7 +4,8 @@ import { has, locale, t } from '../i18n.js';
 import { costLabel, percentText, resumeWarning } from '../resumeCost.js';
 import { useAutosize } from '../hooks/useAutosize.js';
 import { useSessions, when } from '../hooks/useSessions.js';
-import { ArrowUp, Gauge, Stop } from './Icons.jsx';
+import { ArrowUp, Close, Gauge, ImageIcon, Stop } from './Icons.jsx';
+import { usePictures } from '../hooks/usePictures.js';
 import { AgentUsage, useNow } from '../pages/Usage.jsx';
 
 /** 950 -> "950", 12_345 -> "12.3k", 2_400_000 -> "2.4M". */
@@ -120,6 +121,9 @@ export default function Composer({
   const [text, setText] = useState('');
   // "/resume <long session>" asks first: the next message sends the whole conversation again.
   const [confirm, setConfirm] = useState(null);
+  const pics = usePictures(agent.id);
+  const [dragging, setDragging] = useState(false);
+  const file = useRef(null);
   const [active, setActive] = useState(0);
   const [closed, setClosed] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
@@ -191,17 +195,27 @@ export default function Composer({
   function submit(e) {
     e?.preventDefault();
     const value = text.trim();
-    if (!value || !enabled) return;
-    const resume = /^\/resume\s+(\S+)$/.exec(value);
+    // Pictures still uploading hold the message back: it would go without them.
+    if ((!value && !pics.ids.length) || !enabled || pics.uploading) return;
+    const resume = pics.ids.length ? null : /^\/resume\s+(\S+)$/.exec(value);
     const warning = resume ? resumeWarning(sessions.list?.find((s) => s.id === resume[1])) : null;
     if (warning && confirm?.text !== value) {
       setConfirm({ text: value, warning });
       return;
     }
     setConfirm(null);
-    onSend(value);
+    onSend(value, pics.ids);
     setText('');
+    pics.clear();
     setClosed(false);
+  }
+
+  /** Pictures from the clipboard or dropped files; text pastes as usual. */
+  function takeFiles(e, files) {
+    const images = [...(files ?? [])].filter((f) => f.type.startsWith('image/'));
+    if (!images.length) return;
+    e.preventDefault();
+    pics.add(images);
   }
 
   function choose(row) {
@@ -297,8 +311,62 @@ export default function Composer({
           )}
         </div>
       )}
-      <form className="composer chat-composer" onSubmit={submit}>
+      <form
+        className={`composer chat-composer ${dragging ? 'dragging' : ''}`}
+        onSubmit={submit}
+        onDragOver={(e) => {
+          if (![...e.dataTransfer.types].includes('Files')) return;
+          e.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget)) setDragging(false);
+        }}
+        onDrop={(e) => {
+          setDragging(false);
+          takeFiles(e, e.dataTransfer.files);
+        }}
+      >
+        {pics.list.length > 0 && (
+          <div className="pics">
+            {pics.list.map((p) => (
+              <div key={p.key} className={`pic ${p.error ? 'failed' : p.id ? '' : 'loading'}`}>
+                <img src={p.url} alt={p.name} title={p.error ? messageOf(p.error) : p.name} />
+                <button
+                  type="button"
+                  className="pic-remove"
+                  aria-label={t('pics.remove')}
+                  onClick={() => pics.remove(p.key)}
+                >
+                  <Close size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <button
+          type="button"
+          className="attach"
+          aria-label={t('pics.attach')}
+          title={t('pics.attach')}
+          disabled={pics.full}
+          onClick={() => file.current?.click()}
+        >
+          <ImageIcon size={18} />
+        </button>
+        <input
+          ref={file}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          onChange={(e) => {
+            pics.add(e.target.files ?? []);
+            e.target.value = '';
+          }}
+        />
         <textarea
+          onPaste={(e) => takeFiles(e, e.clipboardData?.files)}
           ref={input}
           value={text}
           onChange={(e) => {
@@ -315,12 +383,16 @@ export default function Composer({
           aria-autocomplete="list"
           aria-expanded={Boolean(shown)}
         />
-        {agent.busy && control && !text.trim() ? (
+        {agent.busy && control && !text.trim() && !pics.list.length ? (
           <button type="button" className="send stop" aria-label={t('chat.stop')} onClick={onStop}>
             <Stop size={16} />
           </button>
         ) : (
-          <button className="send" aria-label={t('send')} disabled={!enabled || !text.trim()}>
+          <button
+            className="send"
+            aria-label={t('send')}
+            disabled={!enabled || (!text.trim() && !pics.ids.length) || pics.uploading}
+          >
             <ArrowUp />
           </button>
         )}

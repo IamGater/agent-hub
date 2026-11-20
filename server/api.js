@@ -15,6 +15,7 @@ import {
 import { clearCookie } from './auth/cookie.js';
 import { listProjects } from './agents/projects.js';
 import { readImage } from './agents/images.js';
+import { UPLOAD_MAX_BYTES } from './agents/uploads.js';
 import { SHUTDOWN_DELAY_S } from './agents/power.js';
 import {
   getAutoApprove,
@@ -215,6 +216,21 @@ export function apiRoutes(app, ctx, requireAccess) {
       return reply.code(502).send({ error: 'sessions_failed' });
     }
   });
+
+  // A picture pasted into the message box: stored, and sent with the next message by its id.
+  app.post(
+    '/api/agents/:id/uploads',
+    { preHandler: requireAccess, bodyLimit: UPLOAD_MAX_BYTES },
+    async (req, reply) => {
+      const id = agentId.safeParse(/** @type {{ id?: string }} */ (req.params).id);
+      if (!id.success || !manager.has(id.data) || manager.info(id.data).type === 'terminal')
+        return reply.code(400).send({ error: 'bad_request' });
+      if (!inControl(req)) return reply.code(403).send({ error: 'view_mode' });
+      const upload = Buffer.isBuffer(req.body) ? ctx.uploads.save(req.body) : null;
+      if (!upload) return reply.code(400).send({ error: 'bad_image' });
+      return { id: upload.id };
+    },
+  );
 
   // Images the agent touched, by the opaque id the manager gave them; never by path.
   app.get('/api/agents/:id/images/:image', { preHandler: requireAccess }, async (req, reply) => {

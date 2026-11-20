@@ -490,9 +490,9 @@ export function startCodex(opts) {
       hooks.waiting(null);
       return code;
     }),
-    send(text) {
+    send(text, images = []) {
       if (!threadId) return 'not_ready';
-      const cmd = parseCommand(text);
+      const cmd = images.length ? null : parseCommand(text);
       if (cmd) {
         const result = runCommand(cmd);
         if (result !== undefined) return result;
@@ -500,7 +500,10 @@ export function startCodex(opts) {
       // Unknown "/..." goes through as text: it may just as well be a path.
       turnRequest('turn/start', {
         threadId,
-        input: [{ type: 'text', text, text_elements: [] }],
+        input: [
+          ...images.map((img) => ({ type: 'localImage', path: img.file })),
+          ...(text ? [{ type: 'text', text, text_elements: [] }] : []),
+        ],
         ...overrides,
       });
       return null;

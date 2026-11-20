@@ -132,11 +132,13 @@ export function createManager({
    *   transcript: ReturnType<typeof createTranscript>,
    *   commands: import('./chat/process.js').Command[],
    *   images: Map<string, string>, link: Link | null,
-   *   queue: { itemId: string, text: string, from?: string }[], modelAsk: string | null,
+   *   queue: Queued[], modelAsk: string | null,
    *   account: string, turnUnits: number, limitedTurn: boolean,
    *   wait: NodeJS.Timeout | null, limitTries: number,
    * }} Session
    */
+  /** @typedef {import('./chat/process.js').Picture} Picture */
+  /** @typedef {{ itemId: string, text: string, from?: string, images?: Picture[] }} Queued */
   /** @type {Map<string, Session>} */
   const sessions = new Map();
 
@@ -417,16 +419,17 @@ export function createManager({
 
   /**
    * @param {string} id @param {string} text @param {string} [from] name of the agent it came from
+   * @param {Picture[]} [images] pictures the owner pasted
    * @returns {string | null} an error code, or null when the message was taken
    */
-  function say(id, text, from) {
+  function say(id, text, from, images = []) {
     const s = get(id);
     if (!s.chat) return 'not_running';
     const itemId = `user:${now()}:${Math.random().toString(36).slice(2, 8)}`;
     // While the agent answers, the message waits and goes in as soon as the answer is done.
     if (s.info.busy || s.queue.length) {
       if (s.queue.length >= QUEUE_MAX) return 'queue_full';
-      s.queue.push({ itemId, text, ...(from ? { from } : {}) });
+      s.queue.push({ itemId, text, ...(from ? { from } : {}), ...(images.length ? { images } : {}) });
       chatItem(s, {
         id: itemId,
         kind: 'user',
@@ -434,38 +437,48 @@ export function createManager({
         text,
         status: 'pending',
         ...(from ? { from } : {}),
+        ...(images.length ? { paths: images.map((i) => i.file) } : {}),
       });
       return null;
     }
-    return deliver(s, itemId, text, from);
+    return deliver(s, itemId, text, from, images);
   }
 
   /**
    * Hands a message to the agent and records it in the chat under `itemId`.
    * @param {Session} s @param {string} itemId @param {string} text @param {string} [from]
+   * @param {Picture[]} [images]
    * @returns {string | null} an error code, or null when the agent took it
    */
-  function deliver(s, itemId, text, from) {
+  function deliver(s, itemId, text, from, images = []) {
     if (!s.chat) return 'not_running';
-    const resume = from ? null : /^\/resume(?:\s+(\S*))?\s*$/.exec(text.trim());
+    const resume = from || images.length ? null : /^\/resume(?:\s+(\S*))?\s*$/.exec(text.trim());
     if (resume) {
       if (!resume[1] || !SESSION_ID.test(resume[1])) return 'bad_command';
       void restartOn(s, resume[1]);
       return null;
     }
-    const model = from ? null : /^\/model\s+(\S+)\s*$/.exec(text.trim());
-    const refused = s.chat.send(text);
+    const model = from || images.length ? null : /^\/model\s+(\S+)\s*$/.exec(text.trim());
+    const refused = s.chat.send(text, images);
     if (refused) return refused;
     if (model) s.modelAsk = model[1];
-    chatItem(s, { id: itemId, kind: 'user', ts: now(), text, status: undefined, ...(from ? { from } : {}) });
+    chatItem(s, {
+      id: itemId,
+      kind: 'user',
+      ts: now(),
+      text,
+      status: undefined,
+      ...(from ? { from } : {}),
+      ...(images.length ? { paths: images.map((i) => i.file) } : {}),
+    });
     return null;
   }
 
   /** Sends the next waiting message once the agent is free. @param {Session} s */
   function flush(s) {
     while (s.queue.length && s.chat && !s.info.busy) {
-      const next = /** @type {{ itemId: string, text: string, from?: string }} */ (s.queue.shift());
-      const refused = deliver(s, next.itemId, next.text, next.from);
+      const next = /** @type {Queued} */ (s.queue.shift());
+      const refused = deliver(s, next.itemId, next.text, next.from, next.images);
       if (refused) {
         chatItem(s, { id: next.itemId, kind: 'user', ts: now(), status: 'cancelled' });
         chatItem(s, noticeItem('not_done', { message: refused }, 'error', now()));
@@ -843,8 +856,11 @@ export function createManager({
     transcript: (id) => get(id).transcript.list(),
     /** @param {string} id */
     commands: (id) => get(id).commands,
-    /** Sends a chat message or command from the owner. @param {string} id @param {string} text */
-    say: (id, text) => say(id, text),
+    /**
+     * Sends a chat message or command from the owner, with any pictures they pasted.
+     * @param {string} id @param {string} text @param {Picture[]} [images]
+     */
+    say: (id, text, images) => say(id, text, undefined, images),
     /**
      * Links two running chat agents so their answers go to each other, at most `hops` messages.
      * @param {string} id @param {string} peerId @param {number} hops
@@ -887,9 +903,12 @@ export function createManager({
       if (!file) return null;
       // A tool call that finished means the agent already read the file, with the owner's approval
       // when it was outside the agent's folder; showing it then reveals nothing new.
-      const ran = s.transcript
-        .list()
-        .some((i) => i.kind === 'tool' && i.status === 'ok' && i.images?.some((img) => img.id === imageId));
+      const ran = s.transcript.list().some(
+        (i) =>
+          // The owner's own pictures, or files a finished tool call read.
+          (i.kind === 'user' || (i.kind === 'tool' && i.status === 'ok')) &&
+          i.images?.some((img) => img.id === imageId),
+      );
       return { file, ran };
     },
     /** @param {string} id @param {string} requestId @param {boolean} allow */

@@ -22,6 +22,7 @@ import { authRoutes } from './auth/routes.js';
 import { apiRoutes } from './api.js';
 import { isRemoteEnabled, setAutoApprove, setRemoteEnabled } from './db.js';
 import { createPower } from './agents/power.js';
+import { UPLOAD_MAX_BYTES, createUploads } from './agents/uploads.js';
 import { attachWs } from './ws/server.js';
 
 /**
@@ -49,6 +50,7 @@ import { attachWs } from './ws/server.js';
  *     shutdown: () => void,
  *   },
  *   onLocalWindows?: (count: number) => void,
+ *   uploads: import('./agents/uploads.js').Uploads,
  * }} Ctx
  */
 
@@ -100,6 +102,13 @@ export async function createApp({
   });
   // Only JSON bodies. text/plain is a CORS "simple" type, so accepting it would weaken CSRF defenses.
   app.removeContentTypeParser('text/plain');
+  // Pictures pasted into the message box come as their raw bytes. image/* is not a CORS "simple"
+  // type, so a page elsewhere cannot send one without a preflight the server never allows.
+  app.addContentTypeParser(
+    /^image\/(png|jpeg|gif|webp|bmp)$/,
+    { parseAs: 'buffer', bodyLimit: UPLOAD_MAX_BYTES },
+    (_req, body, done) => done(null, body),
+  );
 
   /** @type {Ctx} */
   const ctx = {
@@ -109,6 +118,7 @@ export async function createApp({
     now,
     notify: notify ?? (async () => {}),
     power,
+    uploads: createUploads(path.join(config.dataDir, 'uploads'), now),
     challenges: createChallenges(now),
     limiter: createLimiter({ now }),
     budget: createBudget({ now, max: 20, windowMs: 60_000 }),
@@ -159,7 +169,10 @@ export async function createApp({
     if (!originAllowed(scope, req.headers.origin)) return reply.code(403).send({ error: 'bad_origin' });
     const site = req.headers['sec-fetch-site'];
     if (site !== undefined && site !== 'same-origin') return reply.code(403).send({ error: 'bad_origin' });
-    if (!String(req.headers['content-type'] ?? '').startsWith('application/json')) {
+    const type = String(req.headers['content-type'] ?? '');
+    // Raw pictures are taken only by the upload route; image/* is not a simple type either.
+    const picture = /^\/api\/agents\/[^/]+\/uploads$/.test(req.url) && /^image\//.test(type);
+    if (!type.startsWith('application/json') && !picture) {
       return reply.code(415).send({ error: 'bad_content_type' });
     }
   });
