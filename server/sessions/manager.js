@@ -918,6 +918,26 @@ export function createManager({
     },
     /** Removes one waiting message. @param {string} id @param {string} itemId */
     unqueue: (id, itemId) => dropQueued(get(id), itemId),
+    /**
+     * A waiting message goes in now: first in line, and the answer in progress is stopped so it
+     * does not wait for the end of it.
+     * @param {string} id @param {string} itemId
+     */
+    sendNow(id, itemId) {
+      const s = get(id);
+      const i = s.queue.findIndex((q) => q.itemId === itemId);
+      if (i < 0) return false;
+      s.queue.unshift(...s.queue.splice(i, 1));
+      if (s.info.busy) {
+        unlink(s);
+        s.chat?.interrupt();
+      } else {
+        // Held for the continue after the limit: the owner takes over.
+        if (clearWait(s)) chatItem(s, noticeItem('limit_cancelled', {}, 'info', now()));
+        flush(s);
+      }
+      return true;
+    },
     /** The owner does not want the agent to continue by itself after the limit. @param {string} id */
     cancelContinue(id) {
       const s = get(id);

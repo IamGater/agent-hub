@@ -256,7 +256,17 @@ function MessageActions({ text, agent, agents, control, conn }) {
 
 // Streaming changes one item many times a second; the others keep their identity and skip
 // re-rendering (and re-parsing their Markdown).
-const Item = memo(function Item({ item, agent, agents, control, conn, onAnswer, onOpen, onUnqueue }) {
+const Item = memo(function Item({
+  item,
+  agent,
+  agents,
+  control,
+  conn,
+  onAnswer,
+  onOpen,
+  onUnqueue,
+  onSendNow,
+}) {
   switch (item.kind) {
     case 'user':
       return (
@@ -269,6 +279,15 @@ const Item = memo(function Item({ item, agent, agents, control, conn, onAnswer, 
           {item.status === 'pending' && (
             <span className="msg-queue">
               {t('chat.queued')}
+              {control && (
+                <button
+                  className="msg-unqueue"
+                  title={t('chat.sendNowHint')}
+                  onClick={() => onSendNow(item.id)}
+                >
+                  {t('chat.sendNow')}
+                </button>
+              )}
               {control && (
                 <button className="msg-unqueue" onClick={() => onUnqueue(item.id)}>
                   {t('chat.unqueue')}
@@ -370,6 +389,13 @@ export default function Chat({ agent, agents, conn, control, wide, blocked }) {
     (itemId) => connSend({ type: 'chat-unqueue', itemId, agentId }),
     [connSend, agentId],
   );
+  const onSendNow = useCallback(
+    (itemId) => {
+      stick.current = true;
+      connSend({ type: 'chat-send-now', itemId, agentId });
+    },
+    [connSend, agentId],
+  );
 
   // Esc stops the answer, like in Claude Code. Not while a picture is open or a menu took the key.
   const canStop = control && agent.busy;
@@ -414,6 +440,7 @@ export default function Chat({ agent, agents, conn, control, wide, blocked }) {
                 onOpen={setImage}
                 onAnswer={onAnswer}
                 onUnqueue={onUnqueue}
+                onSendNow={onSendNow}
               />
             ),
           )}

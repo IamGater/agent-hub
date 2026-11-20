@@ -221,6 +221,7 @@ export function attachWs(ctx) {
       case 'chat-answer':
       case 'chat-interrupt':
       case 'chat-unqueue':
+      case 'chat-send-now':
       case 'chat-link':
       case 'chat-unlink':
       case 'chat-continue-cancel': {
@@ -259,6 +260,10 @@ export function attachWs(ctx) {
           ctx.audit('link', actor(conn), { agentId: msg.agentId, peer: msg.peer, hops: msg.hops });
         } else if (msg.type === 'chat-unqueue') {
           manager.unqueue(msg.agentId, msg.itemId);
+        } else if (msg.type === 'chat-send-now') {
+          if (manager.sendNow(msg.agentId, msg.itemId)) {
+            ctx.audit('interrupt', actor(conn), { agentId: msg.agentId, sendNow: true });
+          }
         } else if (msg.type === 'chat-continue-cancel') {
           manager.cancelContinue(msg.agentId);
           ctx.audit('continue_cancel', actor(conn), { agentId: msg.agentId });
