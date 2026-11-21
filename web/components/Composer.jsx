@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { messageOf } from '../api.js';
 import { has, locale, t } from '../i18n.js';
-import { costLabel, percentText, resumeWarning } from '../resumeCost.js';
+import { costLabel, resumeWarning } from '../resumeCost.js';
 import { useAutosize } from '../hooks/useAutosize.js';
 import { useSessions, when } from '../hooks/useSessions.js';
 import { ArrowUp, Close, Gauge, ImageIcon, Stop } from './Icons.jsx';
@@ -88,13 +88,12 @@ function describe(agent, c) {
   return agent.type === 'codex' && has(`codexcmd.${c.name}`) ? t(`codexcmd.${c.name}`) : c.description;
 }
 
-/** "45.2k tokens · ≈2%": what the answer in progress (or the last one) has spent. */
+/** "45.2k tokens": what the answer in progress (or the last one) has spent. */
 function TurnSpend({ agent }) {
   const tk = agent.turnTokens;
   if (!tk) return null;
   const total = tk.input + tk.cached + tk.output;
   if (!total) return null;
-  const pct = typeof agent.turnPercent === 'number' ? ` · ≈${percentText(agent.turnPercent)}%` : '';
   return (
     <span
       title={t('turn.hint', {
@@ -104,7 +103,6 @@ function TurnSpend({ agent }) {
       })}
     >
       {t('turn.tokens', { tokens: compact(total) })}
-      {pct}
     </span>
   );
 }

@@ -106,8 +106,7 @@ const ru = {
   'timer.last': 'ответ за {time}',
   'timer.lastHint': 'Сколько занял последний ответ',
   'turn.tokens': '{tokens} ток.',
-  'turn.hint':
-    'Потрачено этим ответом (или последним). Вход: {input}, из кэша: {cached}, выход: {output}. Процент — примерная доля 5-часового лимита.',
+  'turn.hint': 'Потрачено этим ответом (или последним). Вход: {input}, из кэша: {cached}, выход: {output}.',
   'limit.wait': '⏸ продолжит в {time}',
   'limit.waitHint': 'Лимит закончился. Когда он обновится, агент сам продолжит работу.',
   'limit.cancel': 'не продолжать',
@@ -139,10 +138,8 @@ const ru = {
   'resume.button': 'Продолжить',
   'resume.title': 'Продолжить прошлую сессию',
   'resume.tokens': '{tokens} ток.',
-  'resume.costPercent':
-    'Восстановление этой сессии будет стоить ≈{percent}% вашего usage (5-часового лимита): первое сообщение заново отправит весь разговор — {tokens} токенов.',
   'resume.costTokens':
-    'Это длинный разговор: первое сообщение после восстановления заново отправит его целиком — {tokens} токенов. Долю лимита хаб покажет, когда соберёт статистику расхода этого аккаунта.',
+    'Это длинный разговор: первое сообщение после восстановления заново отправит его целиком — {tokens} токенов.',
   'resume.warm': 'Сессия использовалась только что, кэш ещё тёплый — выйдет дешевле.',
   'resume.confirm': 'Восстановить',
   'resume.cancel': 'Отмена',
@@ -411,7 +408,7 @@ const en = {
   'timer.lastHint': 'How long the last answer took',
   'turn.tokens': '{tokens} tokens',
   'turn.hint':
-    'Spent by this answer (or the last one). Input: {input}, from cache: {cached}, output: {output}. The percent is an estimated share of the 5-hour limit.',
+    'Spent by this answer (or the last one). Input: {input}, from cache: {cached}, output: {output}.',
   'limit.wait': '⏸ continues at {time}',
   'limit.waitHint': 'The usage limit ran out. When it resets, the agent continues by itself.',
   'limit.cancel': "don't continue",
@@ -443,10 +440,8 @@ const en = {
   'resume.button': 'Resume',
   'resume.title': 'Resume a past session',
   'resume.tokens': '{tokens} tokens',
-  'resume.costPercent':
-    'Resuming this session will cost ≈{percent}% of your usage (5-hour limit): the first message sends the whole conversation again, {tokens} tokens.',
   'resume.costTokens':
-    'This is a long conversation: the first message after resuming sends all of it again, {tokens} tokens. The share of your limit shows once the hub has seen how this account spends.',
+    'This is a long conversation: the first message after resuming sends all of it again, {tokens} tokens.',
   'resume.warm': 'It was used moments ago and the cache is still warm, so it costs less.',
   'resume.confirm': 'Resume',
   'resume.cancel': 'Cancel',
