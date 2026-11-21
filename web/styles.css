@@ -1198,8 +1198,14 @@ textarea:focus {
 .chat-scroll {
   flex: 1;
   min-height: 0;
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+
+.chat-col > * {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .chat-col {
@@ -1399,6 +1405,19 @@ textarea:focus {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  min-width: 0;
+}
+
+.approval:not(.pending) .approval-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.approval-head > .muted {
+  flex: none;
 }
 
 .approval.pending {
@@ -1515,6 +1534,13 @@ textarea:focus {
 .chat-composer textarea {
   max-height: 220px;
   font-size: 1rem;
+}
+
+/* A long hint must not wrap into a tall empty box on a phone. */
+.composer textarea::placeholder {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .composer .send.stop {
